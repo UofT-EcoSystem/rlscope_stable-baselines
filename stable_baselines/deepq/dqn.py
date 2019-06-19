@@ -12,6 +12,7 @@ from stable_baselines.deepq.replay_buffer import ReplayBuffer, PrioritizedReplay
 from stable_baselines.deepq.policies import DQNPolicy
 from stable_baselines.a2c.utils import total_episode_reward_logger
 
+import progressbar
 
 class DQN(OffPolicyRLModel):
     """
@@ -181,7 +182,17 @@ class DQN(OffPolicyRLModel):
             reset = True
             self.episode_reward = np.zeros((1,))
 
-            for _ in range(total_timesteps):
+            if self.verbose >= 1:
+                bar = progressbar.ProgressBar(
+                    min_value=0,
+                    max_value=total_timesteps,
+                    prefix="Training steps",
+                    redirect_stdout=True,
+                )
+
+            for t in range(total_timesteps):
+                if self.verbose >= 1:
+                    bar.update(t)
                 if callback is not None:
                     # Only stop training if return value is False, not when it is None. This is for backwards
                     # compatibility with callbacks that have no return statement.
