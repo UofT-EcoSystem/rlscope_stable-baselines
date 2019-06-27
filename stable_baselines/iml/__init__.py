@@ -17,8 +17,7 @@ def wrap_pybullet():
 
     iml.wrap_entire_module(
         'pybullet',
-        category=CATEGORY_SIMULATOR_CPP,
-        debug=True)
+        category=CATEGORY_SIMULATOR_CPP)
     _wrap_bullet_clients()
 
     # import pybullet
