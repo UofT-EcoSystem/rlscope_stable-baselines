@@ -13,6 +13,7 @@ from stable_baselines.common.runners import AbstractEnvRunner
 from stable_baselines.common.policies import ActorCriticPolicy, RecurrentActorCriticPolicy
 from stable_baselines.a2c.utils import total_episode_reward_logger
 
+import iml_profiler.api as iml
 
 class PPO2(ActorCriticRLModel):
     """
@@ -322,82 +323,84 @@ class PPO2(ActorCriticRLModel):
             t_first_start = time.time()
 
             n_updates = total_timesteps // self.n_batch
-            for update in range(1, n_updates + 1):
-                assert self.n_batch % self.nminibatches == 0
-                batch_size = self.n_batch // self.nminibatches
-                t_start = time.time()
-                frac = 1.0 - (update - 1.0) / n_updates
-                lr_now = self.learning_rate(frac)
-                cliprange_now = self.cliprange(frac)
-                cliprange_vf_now = cliprange_vf(frac)
-                # true_reward is the reward without discount
-                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward = runner.run()
-                self.num_timesteps += self.n_batch
-                ep_info_buf.extend(ep_infos)
-                mb_loss_vals = []
-                if states is None:  # nonrecurrent version
-                    update_fac = self.n_batch // self.nminibatches // self.noptepochs + 1
-                    inds = np.arange(self.n_batch)
-                    for epoch_num in range(self.noptepochs):
-                        np.random.shuffle(inds)
-                        for start in range(0, self.n_batch, batch_size):
-                            timestep = self.num_timesteps // update_fac + ((self.noptepochs * self.n_batch + epoch_num *
-                                                                            self.n_batch + start) // batch_size)
-                            end = start + batch_size
-                            mbinds = inds[start:end]
-                            slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
-                            mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, writer=writer,
-                                                                 update=timestep, cliprange_vf=cliprange_vf_now))
-                else:  # recurrent version
-                    update_fac = self.n_batch // self.nminibatches // self.noptepochs // self.n_steps + 1
-                    assert self.n_envs % self.nminibatches == 0
-                    env_indices = np.arange(self.n_envs)
-                    flat_indices = np.arange(self.n_envs * self.n_steps).reshape(self.n_envs, self.n_steps)
-                    envs_per_batch = batch_size // self.n_steps
-                    for epoch_num in range(self.noptepochs):
-                        np.random.shuffle(env_indices)
-                        for start in range(0, self.n_envs, envs_per_batch):
-                            timestep = self.num_timesteps // update_fac + ((self.noptepochs * self.n_envs + epoch_num *
-                                                                            self.n_envs + start) // envs_per_batch)
-                            end = start + envs_per_batch
-                            mb_env_inds = env_indices[start:end]
-                            mb_flat_inds = flat_indices[mb_env_inds].ravel()
-                            slices = (arr[mb_flat_inds] for arr in (obs, returns, masks, actions, values, neglogpacs))
-                            mb_states = states[mb_env_inds]
-                            mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, update=timestep,
-                                                                 writer=writer, states=mb_states,
-                                                                 cliprange_vf=cliprange_vf_now))
+            with iml.prof.operation('training_loop'):
+                for update in range(1, n_updates + 1):
+                    assert self.n_batch % self.nminibatches == 0
+                    batch_size = self.n_batch // self.nminibatches
+                    t_start = time.time()
+                    frac = 1.0 - (update - 1.0) / n_updates
+                    lr_now = self.learning_rate(frac)
+                    cliprange_now = self.cliprange(frac)
+                    cliprange_vf_now = cliprange_vf(frac)
+                    # true_reward is the reward without discount
+                    obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward = runner.run()
+                    self.num_timesteps += self.n_batch
+                    ep_info_buf.extend(ep_infos)
+                    mb_loss_vals = []
+                    with iml.prof.operation('optimize_surrogate'):
+                        if states is None:  # nonrecurrent version
+                            update_fac = self.n_batch // self.nminibatches // self.noptepochs + 1
+                            inds = np.arange(self.n_batch)
+                            for epoch_num in range(self.noptepochs):
+                                np.random.shuffle(inds)
+                                for start in range(0, self.n_batch, batch_size):
+                                    timestep = self.num_timesteps // update_fac + ((self.noptepochs * self.n_batch + epoch_num *
+                                                                                    self.n_batch + start) // batch_size)
+                                    end = start + batch_size
+                                    mbinds = inds[start:end]
+                                    slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
+                                    mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, writer=writer,
+                                                                         update=timestep, cliprange_vf=cliprange_vf_now))
+                        else:  # recurrent version
+                            update_fac = self.n_batch // self.nminibatches // self.noptepochs // self.n_steps + 1
+                            assert self.n_envs % self.nminibatches == 0
+                            env_indices = np.arange(self.n_envs)
+                            flat_indices = np.arange(self.n_envs * self.n_steps).reshape(self.n_envs, self.n_steps)
+                            envs_per_batch = batch_size // self.n_steps
+                            for epoch_num in range(self.noptepochs):
+                                np.random.shuffle(env_indices)
+                                for start in range(0, self.n_envs, envs_per_batch):
+                                    timestep = self.num_timesteps // update_fac + ((self.noptepochs * self.n_envs + epoch_num *
+                                                                                    self.n_envs + start) // envs_per_batch)
+                                    end = start + envs_per_batch
+                                    mb_env_inds = env_indices[start:end]
+                                    mb_flat_inds = flat_indices[mb_env_inds].ravel()
+                                    slices = (arr[mb_flat_inds] for arr in (obs, returns, masks, actions, values, neglogpacs))
+                                    mb_states = states[mb_env_inds]
+                                    mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, update=timestep,
+                                                                         writer=writer, states=mb_states,
+                                                                         cliprange_vf=cliprange_vf_now))
 
-                loss_vals = np.mean(mb_loss_vals, axis=0)
-                t_now = time.time()
-                fps = int(self.n_batch / (t_now - t_start))
+                    loss_vals = np.mean(mb_loss_vals, axis=0)
+                    t_now = time.time()
+                    fps = int(self.n_batch / (t_now - t_start))
 
-                if writer is not None:
-                    self.episode_reward = total_episode_reward_logger(self.episode_reward,
-                                                                      true_reward.reshape((self.n_envs, self.n_steps)),
-                                                                      masks.reshape((self.n_envs, self.n_steps)),
-                                                                      writer, self.num_timesteps)
+                    if writer is not None:
+                        self.episode_reward = total_episode_reward_logger(self.episode_reward,
+                                                                          true_reward.reshape((self.n_envs, self.n_steps)),
+                                                                          masks.reshape((self.n_envs, self.n_steps)),
+                                                                          writer, self.num_timesteps)
 
-                if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
-                    explained_var = explained_variance(values, returns)
-                    logger.logkv("serial_timesteps", update * self.n_steps)
-                    logger.logkv("n_updates", update)
-                    logger.logkv("total_timesteps", self.num_timesteps)
-                    logger.logkv("fps", fps)
-                    logger.logkv("explained_variance", float(explained_var))
-                    if len(ep_info_buf) > 0 and len(ep_info_buf[0]) > 0:
-                        logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in ep_info_buf]))
-                        logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in ep_info_buf]))
-                    logger.logkv('time_elapsed', t_start - t_first_start)
-                    for (loss_val, loss_name) in zip(loss_vals, self.loss_names):
-                        logger.logkv(loss_name, loss_val)
-                    logger.dumpkvs()
+                    if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
+                        explained_var = explained_variance(values, returns)
+                        logger.logkv("serial_timesteps", update * self.n_steps)
+                        logger.logkv("n_updates", update)
+                        logger.logkv("total_timesteps", self.num_timesteps)
+                        logger.logkv("fps", fps)
+                        logger.logkv("explained_variance", float(explained_var))
+                        if len(ep_info_buf) > 0 and len(ep_info_buf[0]) > 0:
+                            logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in ep_info_buf]))
+                            logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in ep_info_buf]))
+                        logger.logkv('time_elapsed', t_start - t_first_start)
+                        for (loss_val, loss_name) in zip(loss_vals, self.loss_names):
+                            logger.logkv(loss_name, loss_val)
+                        logger.dumpkvs()
 
-                if callback is not None:
-                    # Only stop training if return value is False, not when it is None. This is for backwards
-                    # compatibility with callbacks that have no return statement.
-                    if callback(locals(), globals()) is False:
-                        break
+                    if callback is not None:
+                        # Only stop training if return value is False, not when it is None. This is for backwards
+                        # compatibility with callbacks that have no return statement.
+                        if callback(locals(), globals()) is False:
+                            break
 
             return self
 
@@ -462,7 +465,8 @@ class Runner(AbstractEnvRunner):
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)
+            with iml.prof.operation('sample_action'):
+                actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
             mb_values.append(values)
@@ -472,37 +476,39 @@ class Runner(AbstractEnvRunner):
             # Clip the actions to avoid out of bound error
             if isinstance(self.env.action_space, gym.spaces.Box):
                 clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-            self.obs[:], rewards, self.dones, infos = self.env.step(clipped_actions)
+            with iml.prof.operation('step'):
+                self.obs[:], rewards, self.dones, infos = self.env.step(clipped_actions)
             for info in infos:
                 maybe_ep_info = info.get('episode')
                 if maybe_ep_info is not None:
                     ep_infos.append(maybe_ep_info)
             mb_rewards.append(rewards)
         # batch of steps to batch of rollouts
-        mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
-        mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
-        mb_actions = np.asarray(mb_actions)
-        mb_values = np.asarray(mb_values, dtype=np.float32)
-        mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
-        mb_dones = np.asarray(mb_dones, dtype=np.bool)
-        last_values = self.model.value(self.obs, self.states, self.dones)
-        # discount/bootstrap off value fn
-        mb_advs = np.zeros_like(mb_rewards)
-        true_reward = np.copy(mb_rewards)
-        last_gae_lam = 0
-        for step in reversed(range(self.n_steps)):
-            if step == self.n_steps - 1:
-                nextnonterminal = 1.0 - self.dones
-                nextvalues = last_values
-            else:
-                nextnonterminal = 1.0 - mb_dones[step + 1]
-                nextvalues = mb_values[step + 1]
-            delta = mb_rewards[step] + self.gamma * nextvalues * nextnonterminal - mb_values[step]
-            mb_advs[step] = last_gae_lam = delta + self.gamma * self.lam * nextnonterminal * last_gae_lam
-        mb_returns = mb_advs + mb_values
+        with iml.prof.operation('compute_advantage_estimates'):
+            mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
+            mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
+            mb_actions = np.asarray(mb_actions)
+            mb_values = np.asarray(mb_values, dtype=np.float32)
+            mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
+            mb_dones = np.asarray(mb_dones, dtype=np.bool)
+            last_values = self.model.value(self.obs, self.states, self.dones)
+            # discount/bootstrap off value fn
+            mb_advs = np.zeros_like(mb_rewards)
+            true_reward = np.copy(mb_rewards)
+            last_gae_lam = 0
+            for step in reversed(range(self.n_steps)):
+                if step == self.n_steps - 1:
+                    nextnonterminal = 1.0 - self.dones
+                    nextvalues = last_values
+                else:
+                    nextnonterminal = 1.0 - mb_dones[step + 1]
+                    nextvalues = mb_values[step + 1]
+                delta = mb_rewards[step] + self.gamma * nextvalues * nextnonterminal - mb_values[step]
+                mb_advs[step] = last_gae_lam = delta + self.gamma * self.lam * nextnonterminal * last_gae_lam
+            mb_returns = mb_advs + mb_values
 
-        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward = \
-            map(swap_and_flatten, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward))
+            mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward = \
+                map(swap_and_flatten, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward))
 
         return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_states, ep_infos, true_reward
 
