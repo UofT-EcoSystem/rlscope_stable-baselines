@@ -10,6 +10,7 @@ from tensorflow.python.client import device_lib
 
 from stable_baselines import logger
 
+import logging
 
 def is_image(tensor):
     """
@@ -97,6 +98,8 @@ def make_session(num_cpu=None, make_default=False, graph=None):
         num_cpu = int(os.getenv('RCALL_NUM_CPU', multiprocessing.cpu_count()))
     tf_config = tf.ConfigProto(
         allow_soft_placement=True,
+        # Verify operations are truly GPU-bound and not CPU-bound.
+        log_device_placement=True,
         inter_op_parallelism_threads=num_cpu,
         intra_op_parallelism_threads=num_cpu)
     # Prevent tensorflow from taking all the gpu memory

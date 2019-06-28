@@ -13,6 +13,8 @@ from stable_baselines.a2c.utils import discount_with_dones, Scheduler, mse, \
     total_episode_reward_logger
 from stable_baselines.ppo2.ppo2 import safe_mean
 
+import iml_profiler.api as iml
+
 class A2C(ActorCriticRLModel):
     """
     The A2C (Advantage Actor Critic) model class, https://arxiv.org/abs/1602.01783
@@ -228,47 +230,55 @@ class A2C(ActorCriticRLModel):
             self.learning_rate_schedule = Scheduler(initial_value=self.learning_rate, n_values=total_timesteps,
                                                     schedule=self.lr_schedule)
 
-            runner = A2CRunner(self.env, self, n_steps=self.n_steps, gamma=self.gamma)
-            self.episode_reward = np.zeros((self.n_envs,))
-            # Training stats (when using Monitor wrapper)
-            ep_info_buf = deque(maxlen=100)
+            with iml.prof.operation('training_loop'):
+                runner = A2CRunner(self.env, self, n_steps=self.n_steps, gamma=self.gamma)
+                self.episode_reward = np.zeros((self.n_envs,))
+                # Training stats (when using Monitor wrapper)
+                ep_info_buf = deque(maxlen=100)
 
-            t_start = time.time()
-            for update in range(1, total_timesteps // self.n_batch + 1):
-                # true_reward is the reward without discount
-                obs, states, rewards, masks, actions, values, ep_infos, true_reward = runner.run()
-                ep_info_buf.extend(ep_infos)
-                _, value_loss, policy_entropy = self._train_step(obs, states, rewards, masks, actions, values,
-                                                                 self.num_timesteps // self.n_batch, writer)
-                n_seconds = time.time() - t_start
-                fps = int((update * self.n_batch) / n_seconds)
+                t_start = time.time()
+                for update in range(1, total_timesteps // self.n_batch + 1):
+                    # true_reward is the reward without discount
+                    # NOTE: CPU < 100%
+                    # while True:
+                    obs, states, rewards, masks, actions, values, ep_infos, true_reward = runner.run()
+                    ep_info_buf.extend(ep_infos)
 
-                if writer is not None:
-                    self.episode_reward = total_episode_reward_logger(self.episode_reward,
-                                                                      true_reward.reshape((self.n_envs, self.n_steps)),
-                                                                      masks.reshape((self.n_envs, self.n_steps)),
-                                                                      writer, self.num_timesteps)
+                    # CPU ~ 600% with iml enabled
+                    # CPU ~ 200% with --iml-disable
+                    # while True:
+                    with iml.prof.operation('train_step'):
+                        _, value_loss, policy_entropy = self._train_step(obs, states, rewards, masks, actions, values,
+                                                                         self.num_timesteps // self.n_batch, writer)
+                    n_seconds = time.time() - t_start
+                    fps = int((update * self.n_batch) / n_seconds)
 
-                self.num_timesteps += self.n_batch
+                    if writer is not None:
+                        self.episode_reward = total_episode_reward_logger(self.episode_reward,
+                                                                          true_reward.reshape((self.n_envs, self.n_steps)),
+                                                                          masks.reshape((self.n_envs, self.n_steps)),
+                                                                          writer, self.num_timesteps)
 
-                if callback is not None:
-                    # Only stop training if return value is False, not when it is None. This is for backwards
-                    # compatibility with callbacks that have no return statement.
-                    if callback(locals(), globals()) is False:
-                        break
+                    self.num_timesteps += self.n_batch
 
-                if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
-                    explained_var = explained_variance(values, rewards)
-                    logger.record_tabular("nupdates", update)
-                    logger.record_tabular("total_timesteps", self.num_timesteps)
-                    logger.record_tabular("fps", fps)
-                    logger.record_tabular("policy_entropy", float(policy_entropy))
-                    logger.record_tabular("value_loss", float(value_loss))
-                    logger.record_tabular("explained_variance", float(explained_var))
-                    if len(ep_info_buf) > 0 and len(ep_info_buf[0]) > 0:
-                        logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in ep_info_buf]))
-                        logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in ep_info_buf]))
-                    logger.dump_tabular()
+                    if callback is not None:
+                        # Only stop training if return value is False, not when it is None. This is for backwards
+                        # compatibility with callbacks that have no return statement.
+                        if callback(locals(), globals()) is False:
+                            break
+
+                    if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
+                        explained_var = explained_variance(values, rewards)
+                        logger.record_tabular("nupdates", update)
+                        logger.record_tabular("total_timesteps", self.num_timesteps)
+                        logger.record_tabular("fps", fps)
+                        logger.record_tabular("policy_entropy", float(policy_entropy))
+                        logger.record_tabular("value_loss", float(value_loss))
+                        logger.record_tabular("explained_variance", float(explained_var))
+                        if len(ep_info_buf) > 0 and len(ep_info_buf[0]) > 0:
+                            logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in ep_info_buf]))
+                            logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in ep_info_buf]))
+                        logger.dump_tabular()
 
         return self
 
@@ -321,7 +331,8 @@ class A2CRunner(AbstractEnvRunner):
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            actions, values, states, _ = self.model.step(self.obs, self.states, self.dones)
+            with iml.prof.operation('sample_action'):
+                actions, values, states, _ = self.model.step(self.obs, self.states, self.dones)
             mb_obs.append(np.copy(self.obs))
             mb_actions.append(actions)
             mb_values.append(values)
@@ -330,7 +341,8 @@ class A2CRunner(AbstractEnvRunner):
             # Clip the actions to avoid out of bound error
             if isinstance(self.env.action_space, gym.spaces.Box):
                 clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-            obs, rewards, dones, infos = self.env.step(clipped_actions)
+            with iml.prof.operation('step'):
+                obs, rewards, dones, infos = self.env.step(clipped_actions)
             for info in infos:
                 maybe_ep_info = info.get('episode')
                 if maybe_ep_info is not None:
