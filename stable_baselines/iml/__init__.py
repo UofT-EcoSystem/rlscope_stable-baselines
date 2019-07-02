@@ -83,7 +83,7 @@ class MyBulletClient(object):
         attribute = getattr(pybullet, name)
         if (
                 inspect.isbuiltin(attribute) or
-                ( isinstance(CFuncWrapper) and inspect.isbuiltin(attribute.func) )
+                ( isinstance(attribute, CFuncWrapper) and inspect.isbuiltin(attribute.func) )
         ) and name not in [
             "invertTransform",
             "multiplyTransforms",
