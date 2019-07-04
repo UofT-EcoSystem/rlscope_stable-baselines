@@ -15,24 +15,28 @@ import functools
 
 def wrap_pybullet():
 
-    iml.wrap_entire_module(
-        'pybullet',
-        category=CATEGORY_SIMULATOR_CPP)
-    _wrap_bullet_clients()
-
-    # import pybullet
-    # iml.wrap_module(
-    #     pybullet, category=CATEGORY_SIMULATOR_CPP,
-    #     ignore_func_regex=ignore_func_regex,
+    # iml.wrap_entire_module(
+    #     'pybullet',
+    #     category=CATEGORY_SIMULATOR_CPP,
     #     debug=True)
+    # _wrap_bullet_clients()
+
+    def should_wrap(name, func):
+        return inspect.isbuiltin(func)
+    iml.wrap_module(
+        pybullet, category=CATEGORY_SIMULATOR_CPP,
+        should_wrap=should_wrap,
+        # debug=True,
+    )
+    _wrap_bullet_clients()
 
 def unwrap_pybullet():
 
-    _unwrap_bullet_clients()
-    iml.unwrap_entire_module('pybullet')
+    # _unwrap_bullet_clients()
+    # iml.unwrap_entire_module('pybullet')
 
-    # import pybullet
-    # iml.unwrap_module(pybullet)
+    _unwrap_bullet_clients()
+    iml.unwrap_module(pybullet)
 
 #
 # IML: pybullet specific work-around!
