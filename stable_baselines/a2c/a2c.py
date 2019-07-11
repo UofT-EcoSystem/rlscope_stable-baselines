@@ -238,6 +238,10 @@ class A2C(ActorCriticRLModel):
 
                 t_start = time.time()
                 for update in range(1, total_timesteps // self.n_batch + 1):
+                    iml.prof.report_progress(
+                        percent_complete=(update-1)/float(total_timesteps // self.n_batch),
+                        num_timesteps=update * self.n_batch,
+                        total_timesteps=total_timesteps)
                     # true_reward is the reward without discount
                     # NOTE: CPU < 100%
                     # while True:

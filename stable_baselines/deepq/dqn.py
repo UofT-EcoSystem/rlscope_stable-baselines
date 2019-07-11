@@ -193,8 +193,12 @@ class DQN(OffPolicyRLModel):
                     redirect_stdout=True,
                 )
 
-            for t in range(total_timesteps):
-                with iml.prof.operation('training_loop'):
+            with iml.prof.operation('training_loop'):
+                for t in range(total_timesteps):
+                    iml.prof.report_progress(
+                        percent_complete=t/float(total_timesteps),
+                        num_timesteps=t,
+                        total_timesteps=total_timesteps)
                     if self.verbose >= 1:
                         bar.update(t)
                     if callback is not None:

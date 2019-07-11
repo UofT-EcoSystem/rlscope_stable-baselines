@@ -325,6 +325,10 @@ class PPO2(ActorCriticRLModel):
             n_updates = total_timesteps // self.n_batch
             with iml.prof.operation('training_loop'):
                 for update in range(1, n_updates + 1):
+                    iml.prof.report_progress(
+                        percent_complete=(update-1)/float(total_timesteps // self.n_batch),
+                        num_timesteps=update * self.n_batch,
+                        total_timesteps=total_timesteps)
                     assert self.n_batch % self.nminibatches == 0
                     batch_size = self.n_batch // self.nminibatches
                     t_start = time.time()

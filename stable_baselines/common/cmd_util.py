@@ -47,8 +47,12 @@ def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None,
     if num_env == 1:
         return DummyVecEnv([make_env(0)])
 
-    return SubprocVecEnv([make_env(i + start_index) for i in range(num_env)],
-                         start_method=start_method)
+    # TODO: IML: We should support SubprocVecEnv here...
+    # NOTE: this is just an issue with the Atari environments.
+    assert start_method is None
+    return DummyVecEnv([make_env(i + start_index) for i in range(num_env)])
+    # return SubprocVecEnv([make_env(i + start_index) for i in range(num_env)],
+    #                      start_method=start_method)
 
 
 def make_mujoco_env(env_id, seed, allow_early_resets=True):
