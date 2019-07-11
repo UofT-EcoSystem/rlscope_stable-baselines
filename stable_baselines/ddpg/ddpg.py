@@ -853,6 +853,10 @@ class DDPG(OffPolicyRLModel):
                             for _ in range(self.nb_rollout_steps):
                                 if total_steps >= total_timesteps:
                                     return self
+                                iml.prof.report_progress(
+                                    percent_complete=total_steps/float(total_timesteps),
+                                    num_timesteps=total_steps,
+                                    total_timesteps=total_timesteps)
 
                                 # Predict next action.
                                 with iml.prof.operation('sample_action'):
@@ -951,10 +955,6 @@ class DDPG(OffPolicyRLModel):
                                     for _ in range(self.nb_eval_steps):
                                         if total_steps >= total_timesteps:
                                             return self
-                                        iml.prof.report_progress(
-                                            percent_complete=total_steps/float(total_timesteps),
-                                            num_timesteps=total_steps,
-                                            total_timesteps=total_timesteps)
 
                                         eval_action, eval_q = self._policy(eval_obs, apply_noise=False, compute_q=True)
                                         eval_obs, eval_r, eval_done, _ = self.eval_env.step(eval_action *
