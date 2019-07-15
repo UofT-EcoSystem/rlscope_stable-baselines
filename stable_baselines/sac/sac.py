@@ -360,6 +360,15 @@ class SAC(OffPolicyRLModel):
 
         return policy_loss, qf1_loss, qf2_loss, value_loss, entropy
 
+    def is_warmed_up(self):
+        """
+        Return true once we are executing the full training-loop.
+
+        :return:
+        """
+        can_sample = self.replay_buffer.can_sample(self.batch_size)
+        return can_sample and self.num_timesteps >= self.learning_starts
+
     def learn(self, total_timesteps, callback=None, seed=None,
               log_interval=4, tb_log_name="SAC", reset_num_timesteps=True, replay_wrapper=None):
 
@@ -389,12 +398,18 @@ class SAC(OffPolicyRLModel):
             n_updates = 0
             infos_values = []
 
-            with iml.prof.operation('training_loop'):
-                for step in range(total_timesteps):
+            for step in range(total_timesteps):
+                with iml.prof.operation('training_loop'):
+
+                    if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
+                        # Entire training loop is now running; enable IML tracing
+                        iml.prof.enable_tracing()
+
                     iml.prof.report_progress(
                         percent_complete=step/float(total_timesteps),
                         num_timesteps=step,
                         total_timesteps=total_timesteps)
+
                     if callback is not None:
                         # Only stop training if return value is False, not when it is None. This is for backwards
                         # compatibility with callbacks that have no return statement.

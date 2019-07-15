@@ -303,6 +303,15 @@ class PPO2(ActorCriticRLModel):
 
         return policy_loss, value_loss, policy_entropy, approxkl, clipfrac
 
+    def is_warmed_up(self):
+        """
+        Return true once we are executing the full training-loop.
+
+        :return:
+        """
+        # PPO has no warmup phase.
+        return True
+
     def learn(self, total_timesteps, callback=None, seed=None, log_interval=1, tb_log_name="PPO2",
               reset_num_timesteps=True):
         # Transform to callable if needed
@@ -323,12 +332,18 @@ class PPO2(ActorCriticRLModel):
             t_first_start = time.time()
 
             n_updates = total_timesteps // self.n_batch
-            with iml.prof.operation('training_loop'):
-                for update in range(1, n_updates + 1):
-                    iml.prof.report_progress(
-                        percent_complete=(update-1)/float(total_timesteps // self.n_batch),
-                        num_timesteps=update * self.n_batch,
-                        total_timesteps=total_timesteps)
+            for update in range(1, n_updates + 1):
+
+                if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
+                    # Entire training loop is now running; enable IML tracing
+                    iml.prof.enable_tracing()
+
+                iml.prof.report_progress(
+                    percent_complete=(update-1)/float(total_timesteps // self.n_batch),
+                    num_timesteps=update * self.n_batch,
+                    total_timesteps=total_timesteps)
+
+                with iml.prof.operation('training_loop'):
                     assert self.n_batch % self.nminibatches == 0
                     batch_size = self.n_batch // self.nminibatches
                     t_start = time.time()

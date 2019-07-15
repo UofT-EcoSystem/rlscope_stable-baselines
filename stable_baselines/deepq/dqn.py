@@ -146,6 +146,15 @@ class DQN(OffPolicyRLModel):
 
                 self.summary = tf.summary.merge_all()
 
+    def is_warmed_up(self):
+        """
+        Return true once we are executing the full training-loop.
+
+        :return:
+        """
+        can_sample = self.replay_buffer.can_sample(self.batch_size)
+        return can_sample and self.num_timesteps > self.learning_starts
+
     def learn(self, total_timesteps, callback=None, seed=None, log_interval=100, tb_log_name="DQN",
               reset_num_timesteps=True, replay_wrapper=None):
 
@@ -193,12 +202,18 @@ class DQN(OffPolicyRLModel):
                     redirect_stdout=True,
                 )
 
-            with iml.prof.operation('training_loop'):
-                for t in range(total_timesteps):
-                    iml.prof.report_progress(
-                        percent_complete=t/float(total_timesteps),
-                        num_timesteps=t,
-                        total_timesteps=total_timesteps)
+            for t in range(total_timesteps):
+
+                if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
+                    # Entire training loop is now running; enable IML tracing
+                    iml.prof.enable_tracing()
+
+                iml.prof.report_progress(
+                    percent_complete=t/float(total_timesteps),
+                    num_timesteps=t,
+                    total_timesteps=total_timesteps)
+
+                with iml.prof.operation('training_loop'):
                     if self.verbose >= 1:
                         bar.update(t)
                     if callback is not None:

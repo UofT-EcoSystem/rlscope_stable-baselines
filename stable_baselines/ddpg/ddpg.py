@@ -794,6 +794,16 @@ class DDPG(OffPolicyRLModel):
                 self.param_noise_stddev: self.param_noise.current_stddev,
             })
 
+    def is_warmed_up(self):
+        """
+        Return true once we are executing the full training-loop.
+
+        :return:
+        """
+        # can_sample affects whether DDPG performs 'train_step' and 'update_target_network'
+        can_sample = self.replay_buffer.can_sample(self.batch_size)
+        return can_sample
+
     def learn(self, total_timesteps, callback=None, seed=None, log_interval=100, tb_log_name="DDPG",
               reset_num_timesteps=True, replay_wrapper=None):
 
@@ -846,17 +856,23 @@ class DDPG(OffPolicyRLModel):
                 epoch_qs = []
                 epoch_episodes = 0
                 epoch = 0
-                with iml.prof.operation('training_loop'):
-                    while True:
-                        for _ in range(log_interval):
+                while True:
+                    for _ in range(log_interval):
+
+                        if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
+                            # Entire training loop is now running; enable IML tracing
+                            iml.prof.enable_tracing()
+
+                        iml.prof.report_progress(
+                            percent_complete=total_steps/float(total_timesteps),
+                            num_timesteps=total_steps,
+                            total_timesteps=total_timesteps)
+
+                        with iml.prof.operation('training_loop'):
                             # Perform rollouts.
                             for _ in range(self.nb_rollout_steps):
                                 if total_steps >= total_timesteps:
                                     return self
-                                iml.prof.report_progress(
-                                    percent_complete=total_steps/float(total_timesteps),
-                                    num_timesteps=total_steps,
-                                    total_timesteps=total_timesteps)
 
                                 # Predict next action.
                                 with iml.prof.operation('sample_action'):
@@ -971,70 +987,70 @@ class DDPG(OffPolicyRLModel):
                                             eval_episode_rewards_history.append(eval_episode_reward)
                                             eval_episode_reward = 0.
 
-                        mpi_size = MPI.COMM_WORLD.Get_size()
-                        # Log stats.
-                        # XXX shouldn't call np.mean on variable length lists
-                        duration = time.time() - start_time
-                        stats = self._get_stats()
-                        combined_stats = stats.copy()
-                        combined_stats['rollout/return'] = np.mean(epoch_episode_rewards)
-                        combined_stats['rollout/return_history'] = np.mean(episode_rewards_history)
-                        combined_stats['rollout/episode_steps'] = np.mean(epoch_episode_steps)
-                        combined_stats['rollout/actions_mean'] = np.mean(epoch_actions)
-                        combined_stats['rollout/Q_mean'] = np.mean(epoch_qs)
-                        combined_stats['train/loss_actor'] = np.mean(epoch_actor_losses)
-                        combined_stats['train/loss_critic'] = np.mean(epoch_critic_losses)
-                        if len(epoch_adaptive_distances) != 0:
-                            combined_stats['train/param_noise_distance'] = np.mean(epoch_adaptive_distances)
-                        combined_stats['total/duration'] = duration
-                        combined_stats['total/steps_per_second'] = float(step) / float(duration)
-                        combined_stats['total/episodes'] = episodes
-                        combined_stats['rollout/episodes'] = epoch_episodes
-                        combined_stats['rollout/actions_std'] = np.std(epoch_actions)
-                        # Evaluation statistics.
-                        if self.eval_env is not None:
-                            combined_stats['eval/return'] = np.mean(eval_episode_rewards)
-                            combined_stats['eval/return_history'] = np.mean(eval_episode_rewards_history)
-                            combined_stats['eval/Q'] = np.mean(eval_qs)
-                            combined_stats['eval/episodes'] = len(eval_episode_rewards)
+                    mpi_size = MPI.COMM_WORLD.Get_size()
+                    # Log stats.
+                    # XXX shouldn't call np.mean on variable length lists
+                    duration = time.time() - start_time
+                    stats = self._get_stats()
+                    combined_stats = stats.copy()
+                    combined_stats['rollout/return'] = np.mean(epoch_episode_rewards)
+                    combined_stats['rollout/return_history'] = np.mean(episode_rewards_history)
+                    combined_stats['rollout/episode_steps'] = np.mean(epoch_episode_steps)
+                    combined_stats['rollout/actions_mean'] = np.mean(epoch_actions)
+                    combined_stats['rollout/Q_mean'] = np.mean(epoch_qs)
+                    combined_stats['train/loss_actor'] = np.mean(epoch_actor_losses)
+                    combined_stats['train/loss_critic'] = np.mean(epoch_critic_losses)
+                    if len(epoch_adaptive_distances) != 0:
+                        combined_stats['train/param_noise_distance'] = np.mean(epoch_adaptive_distances)
+                    combined_stats['total/duration'] = duration
+                    combined_stats['total/steps_per_second'] = float(step) / float(duration)
+                    combined_stats['total/episodes'] = episodes
+                    combined_stats['rollout/episodes'] = epoch_episodes
+                    combined_stats['rollout/actions_std'] = np.std(epoch_actions)
+                    # Evaluation statistics.
+                    if self.eval_env is not None:
+                        combined_stats['eval/return'] = np.mean(eval_episode_rewards)
+                        combined_stats['eval/return_history'] = np.mean(eval_episode_rewards_history)
+                        combined_stats['eval/Q'] = np.mean(eval_qs)
+                        combined_stats['eval/episodes'] = len(eval_episode_rewards)
 
-                        def as_scalar(scalar):
-                            """
-                            check and return the input if it is a scalar, otherwise raise ValueError
+                    def as_scalar(scalar):
+                        """
+                        check and return the input if it is a scalar, otherwise raise ValueError
 
-                            :param scalar: (Any) the object to check
-                            :return: (Number) the scalar if x is a scalar
-                            """
-                            if isinstance(scalar, np.ndarray):
-                                assert scalar.size == 1
-                                return scalar[0]
-                            elif np.isscalar(scalar):
-                                return scalar
-                            else:
-                                raise ValueError('expected scalar, got %s' % scalar)
+                        :param scalar: (Any) the object to check
+                        :return: (Number) the scalar if x is a scalar
+                        """
+                        if isinstance(scalar, np.ndarray):
+                            assert scalar.size == 1
+                            return scalar[0]
+                        elif np.isscalar(scalar):
+                            return scalar
+                        else:
+                            raise ValueError('expected scalar, got %s' % scalar)
 
-                        combined_stats_sums = MPI.COMM_WORLD.allreduce(
-                            np.array([as_scalar(x) for x in combined_stats.values()]))
-                        combined_stats = {k: v / mpi_size for (k, v) in zip(combined_stats.keys(), combined_stats_sums)}
+                    combined_stats_sums = MPI.COMM_WORLD.allreduce(
+                        np.array([as_scalar(x) for x in combined_stats.values()]))
+                    combined_stats = {k: v / mpi_size for (k, v) in zip(combined_stats.keys(), combined_stats_sums)}
 
-                        # Total statistics.
-                        combined_stats['total/epochs'] = epoch + 1
-                        combined_stats['total/steps'] = step
+                    # Total statistics.
+                    combined_stats['total/epochs'] = epoch + 1
+                    combined_stats['total/steps'] = step
 
-                        for key in sorted(combined_stats.keys()):
-                            logger.record_tabular(key, combined_stats[key])
-                        if len(episode_successes) > 0:
-                            logger.logkv("success rate", np.mean(episode_successes[-100:]))
-                        logger.dump_tabular()
-                        logger.info('')
-                        logdir = logger.get_dir()
-                        if rank == 0 and logdir:
-                            if hasattr(self.env, 'get_state'):
-                                with open(os.path.join(logdir, 'env_state.pkl'), 'wb') as file_handler:
-                                    pickle.dump(self.env.get_state(), file_handler)
-                            if self.eval_env and hasattr(self.eval_env, 'get_state'):
-                                with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as file_handler:
-                                    pickle.dump(self.eval_env.get_state(), file_handler)
+                    for key in sorted(combined_stats.keys()):
+                        logger.record_tabular(key, combined_stats[key])
+                    if len(episode_successes) > 0:
+                        logger.logkv("success rate", np.mean(episode_successes[-100:]))
+                    logger.dump_tabular()
+                    logger.info('')
+                    logdir = logger.get_dir()
+                    if rank == 0 and logdir:
+                        if hasattr(self.env, 'get_state'):
+                            with open(os.path.join(logdir, 'env_state.pkl'), 'wb') as file_handler:
+                                pickle.dump(self.env.get_state(), file_handler)
+                        if self.eval_env and hasattr(self.eval_env, 'get_state'):
+                            with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as file_handler:
+                                pickle.dump(self.eval_env.get_state(), file_handler)
 
     def predict(self, observation, state=None, mask=None, deterministic=True):
         observation = np.array(observation)

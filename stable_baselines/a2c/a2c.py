@@ -218,6 +218,14 @@ class A2C(ActorCriticRLModel):
 
         return policy_loss, value_loss, policy_entropy
 
+    def is_warmed_up(self):
+        """
+        Return true once we are executing the full training-loop.
+
+        :return:
+        """
+        return True
+
     def learn(self, total_timesteps, callback=None, seed=None, log_interval=100, tb_log_name="A2C",
               reset_num_timesteps=True):
 
@@ -230,18 +238,24 @@ class A2C(ActorCriticRLModel):
             self.learning_rate_schedule = Scheduler(initial_value=self.learning_rate, n_values=total_timesteps,
                                                     schedule=self.lr_schedule)
 
-            with iml.prof.operation('training_loop'):
-                runner = A2CRunner(self.env, self, n_steps=self.n_steps, gamma=self.gamma)
-                self.episode_reward = np.zeros((self.n_envs,))
-                # Training stats (when using Monitor wrapper)
-                ep_info_buf = deque(maxlen=100)
+            runner = A2CRunner(self.env, self, n_steps=self.n_steps, gamma=self.gamma)
+            self.episode_reward = np.zeros((self.n_envs,))
+            # Training stats (when using Monitor wrapper)
+            ep_info_buf = deque(maxlen=100)
 
-                t_start = time.time()
-                for update in range(1, total_timesteps // self.n_batch + 1):
-                    iml.prof.report_progress(
-                        percent_complete=(update-1)/float(total_timesteps // self.n_batch),
-                        num_timesteps=update * self.n_batch,
-                        total_timesteps=total_timesteps)
+            t_start = time.time()
+            for update in range(1, total_timesteps // self.n_batch + 1):
+
+                if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
+                    # Entire training loop is now running; enable IML tracing
+                    iml.prof.enable_tracing()
+
+                iml.prof.report_progress(
+                    percent_complete=(update-1)/float(total_timesteps // self.n_batch),
+                    num_timesteps=update * self.n_batch,
+                    total_timesteps=total_timesteps)
+
+                with iml.prof.operation('training_loop'):
                     # true_reward is the reward without discount
                     # NOTE: CPU < 100%
                     # while True:
