@@ -399,16 +399,17 @@ class SAC(OffPolicyRLModel):
             infos_values = []
 
             for step in range(total_timesteps):
+
+                if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
+                    # Entire training loop is now running; enable IML tracing
+                    iml.prof.enable_tracing()
+
+                iml.prof.report_progress(
+                    percent_complete=step/float(total_timesteps),
+                    num_timesteps=step,
+                    total_timesteps=total_timesteps)
+
                 with iml.prof.operation('training_loop'):
-
-                    if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
-                        # Entire training loop is now running; enable IML tracing
-                        iml.prof.enable_tracing()
-
-                    iml.prof.report_progress(
-                        percent_complete=step/float(total_timesteps),
-                        num_timesteps=step,
-                        total_timesteps=total_timesteps)
 
                     if callback is not None:
                         # Only stop training if return value is False, not when it is None. This is for backwards
