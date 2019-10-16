@@ -828,7 +828,7 @@ class DDPG(OffPolicyRLModel):
             self.episode_reward = np.zeros((1,))
             with self.sess.as_default(), self.graph.as_default():
                 ret = self._train(
-                    writer, 
+                    writer,
                     total_timesteps, callback=callback, seed=seed, log_interval=log_interval,
                 )
                 iml.prof.report_progress(
@@ -836,14 +836,14 @@ class DDPG(OffPolicyRLModel):
                     num_timesteps=total_timesteps,
                     total_timesteps=total_timesteps)
                 return ret
-            
+
     def _train(self, writer, total_timesteps, callback=None, seed=None, log_interval=100):
         rank = MPI.COMM_WORLD.Get_rank()
-        
+
         eval_episode_rewards_history = deque(maxlen=100)
         episode_rewards_history = deque(maxlen=100)
         episode_successes = []
-        
+
         # Prepare everything.
         self._reset()
         obs = self.env.reset()
@@ -869,6 +869,14 @@ class DDPG(OffPolicyRLModel):
         epoch_qs = []
         epoch_episodes = 0
         epoch = 0
+
+        if total_timesteps <= self.batch_size:
+            print(("IML WARNING: training loop won't get traced; you need to use a "
+                   "larger number for --n-timesteps (currently {t}) > batch_size = {batch_size}").format(
+                t=total_timesteps,
+                batch_size=self.batch_size,
+            ))
+
         while True:
             for _ in range(log_interval):
 

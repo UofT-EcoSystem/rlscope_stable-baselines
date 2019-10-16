@@ -398,6 +398,13 @@ class SAC(OffPolicyRLModel):
             n_updates = 0
             infos_values = []
 
+            if total_timesteps <= self.learning_starts:
+                print(("IML WARNING: training loop won't get traced; you need to use a "
+                       "larger number for --n-timesteps (currently {t}) > learning_starts = {learning_starts}").format(
+                    t=total_timesteps,
+                    learning_starts=self.learning_starts,
+                ))
+
             for step in range(total_timesteps):
 
                 if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
@@ -526,12 +533,12 @@ class SAC(OffPolicyRLModel):
                         logger.dumpkvs()
                         # Reset infos:
                         infos_values = []
-                        
+
             iml.prof.report_progress(
                 percent_complete=1,
                 num_timesteps=total_timesteps,
                 total_timesteps=total_timesteps)
-            
+
             return self
 
     def action_probability(self, observation, state=None, mask=None, actions=None):

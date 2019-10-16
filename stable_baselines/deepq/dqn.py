@@ -202,6 +202,13 @@ class DQN(OffPolicyRLModel):
                     redirect_stdout=True,
                 )
 
+            if total_timesteps <= self.learning_starts:
+                print(("IML WARNING: training loop won't get traced; you need to use a "
+                       "larger number for --n-timesteps (currently {t}) > learning_starts = {learning_starts}").format(
+                    t=total_timesteps,
+                    learning_starts=self.learning_starts,
+                ))
+
             for t in range(total_timesteps):
 
                 if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:

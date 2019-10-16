@@ -374,7 +374,7 @@ class PPO2(ActorCriticRLModel):
                 ))
             )
             if n_updates == 0:
-                print(("WARNING: training loop will execute for 0 iterations; you need to use a "
+                print(("IML WARNING: training loop won't get traced; you need to use a "
                        "larger number for --n-timesteps (currently {t}); preferably some multiple of {n_batch}").format(
                     t=total_timesteps,
                     n_batch=self.n_batch,

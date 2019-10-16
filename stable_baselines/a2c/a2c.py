@@ -243,6 +243,14 @@ class A2C(ActorCriticRLModel):
             # Training stats (when using Monitor wrapper)
             ep_info_buf = deque(maxlen=100)
 
+            n_updates = total_timesteps // self.n_batch
+            if n_updates == 0:
+                print(("IML WARNING: training loop won't get traced; you need to use a "
+                       "larger number for --n-timesteps (currently {t}); preferably some multiple of {n_batch}").format(
+                    t=total_timesteps,
+                    n_batch=self.n_batch,
+                ))
+
             t_start = time.time()
             for update in range(1, total_timesteps // self.n_batch + 1):
 
