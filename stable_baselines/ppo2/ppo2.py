@@ -1,5 +1,6 @@
 import time
 import sys
+import textwrap
 import multiprocessing
 import progressbar
 from collections import deque
@@ -352,9 +353,36 @@ class PPO2(ActorCriticRLModel):
             #     'n_batch': self.n_batch,
             # })
 
+            # > n_updates = 0
+            #   total_timesteps = 10000
+            #   n_batch = 16384
+            #   n_envs = 8
+            #   n_steps = 2048
+            print(
+                textwrap.dedent("""\
+                    > n_updates = {n_updates}
+                      total_timesteps = {total_timesteps}
+                      n_batch = {n_batch}
+                      n_envs = {n_envs} 
+                      n_steps = {n_steps}
+                    """.format(
+                    n_updates=n_updates,
+                    total_timesteps=total_timesteps,
+                    n_batch=self.n_batch,
+                    n_envs=self.n_envs,
+                    n_steps=self.n_steps,
+                ))
+            )
+            if n_updates == 0:
+                print(("WARNING: training loop will execute for 0 iterations; you need to use a "
+                       "larger number for --n-timesteps (currently {t}); preferably some multiple of {n_batch}").format(
+                    t=total_timesteps,
+                    n_batch=self.n_batch,
+                ))
+
             for update in range(1, n_updates + 1):
-                print("> update = {update}, training step = {step}".format(update=update,
-                                                                           step=update * self.n_batch))
+                # print("> update = {update}, training step = {step}".format(update=update,
+                #                                                            step=update * self.n_batch))
 
                 if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
                     # Entire training loop is now running; enable IML tracing
