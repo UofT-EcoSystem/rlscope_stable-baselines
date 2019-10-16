@@ -298,6 +298,11 @@ class A2C(ActorCriticRLModel):
                             logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in ep_info_buf]))
                         logger.dump_tabular()
 
+            iml.prof.report_progress(
+                percent_complete=1,
+                num_timesteps=total_timesteps,
+                total_timesteps=total_timesteps)
+
         return self
 
     def save(self, save_path):

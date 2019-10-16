@@ -326,6 +326,11 @@ class DQN(OffPolicyRLModel):
 
                     self.num_timesteps += 1
 
+        iml.prof.report_progress(
+            percent_complete=1,
+            num_timesteps=total_timesteps,
+            total_timesteps=total_timesteps)
+
         return self
 
     def predict(self, observation, state=None, mask=None, deterministic=True):

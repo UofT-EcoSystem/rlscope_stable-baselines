@@ -526,6 +526,12 @@ class SAC(OffPolicyRLModel):
                         logger.dumpkvs()
                         # Reset infos:
                         infos_values = []
+                        
+            iml.prof.report_progress(
+                percent_complete=1,
+                num_timesteps=total_timesteps,
+                total_timesteps=total_timesteps)
+            
             return self
 
     def action_probability(self, observation, state=None, mask=None, actions=None):

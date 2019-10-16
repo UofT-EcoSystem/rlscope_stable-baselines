@@ -1,6 +1,7 @@
 import time
 import sys
 import multiprocessing
+import progressbar
 from collections import deque
 
 import gym
@@ -332,7 +333,28 @@ class PPO2(ActorCriticRLModel):
             t_first_start = time.time()
 
             n_updates = total_timesteps // self.n_batch
+            # assert n_updates > 0
+
+            if self.verbose >= 1:
+                bar = progressbar.ProgressBar(
+                    min_value=1,
+                    max_value=n_updates + 1,
+                    prefix="Training steps",
+                    redirect_stdout=True,
+                )
+
+            # import pprint
+            # pprint.pprint({
+            #     # 0
+            #     'n_updates': n_updates,
+            #     'total_timesteps': total_timesteps,
+            #     # 2048
+            #     'n_batch': self.n_batch,
+            # })
+
             for update in range(1, n_updates + 1):
+                print("> update = {update}, training step = {step}".format(update=update,
+                                                                           step=update * self.n_batch))
 
                 if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
                     # Entire training loop is now running; enable IML tracing
@@ -340,8 +362,11 @@ class PPO2(ActorCriticRLModel):
 
                 iml.prof.report_progress(
                     percent_complete=(update-1)/float(total_timesteps // self.n_batch),
-                    num_timesteps=update * self.n_batch,
+                    num_timesteps=(update-1) * self.n_batch,
                     total_timesteps=total_timesteps)
+
+                if self.verbose >= 1:
+                    bar.update(update)
 
                 with iml.prof.operation('training_loop'):
                     assert self.n_batch % self.nminibatches == 0
@@ -420,6 +445,14 @@ class PPO2(ActorCriticRLModel):
                         # compatibility with callbacks that have no return statement.
                         if callback(locals(), globals()) is False:
                             break
+
+            # print("> Final report_progress call: total_timesteps={t}".format(
+            #     t=total_timesteps))
+            # assert iml.prof.tracing_enabled
+            iml.prof.report_progress(
+                percent_complete=1,
+                num_timesteps=total_timesteps,
+                total_timesteps=total_timesteps)
 
             return self
 

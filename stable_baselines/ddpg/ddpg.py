@@ -819,238 +819,251 @@ class DDPG(OffPolicyRLModel):
             # a list for tensorboard logging, to prevent logging with the same step number, if it already occured
             self.tb_seen_steps = []
 
-            rank = MPI.COMM_WORLD.Get_rank()
             # we assume symmetric actions.
             assert np.all(np.abs(self.env.action_space.low) == self.env.action_space.high)
             if self.verbose >= 2:
                 logger.log('Using agent with the following configuration:')
                 logger.log(str(self.__dict__.items()))
 
-            eval_episode_rewards_history = deque(maxlen=100)
-            episode_rewards_history = deque(maxlen=100)
             self.episode_reward = np.zeros((1,))
-            episode_successes = []
             with self.sess.as_default(), self.graph.as_default():
-                # Prepare everything.
-                self._reset()
-                obs = self.env.reset()
-                eval_obs = None
-                if self.eval_env is not None:
-                    eval_obs = self.eval_env.reset()
-                episode_reward = 0.
-                episode_step = 0
-                episodes = 0
-                step = 0
-                total_steps = 0
+                ret = self._train(
+                    writer, 
+                    total_timesteps, callback=callback, seed=seed, log_interval=log_interval,
+                )
+                iml.prof.report_progress(
+                    percent_complete=1,
+                    num_timesteps=total_timesteps,
+                    total_timesteps=total_timesteps)
+                return ret
+            
+    def _train(self, writer, total_timesteps, callback=None, seed=None, log_interval=100):
+        rank = MPI.COMM_WORLD.Get_rank()
+        
+        eval_episode_rewards_history = deque(maxlen=100)
+        episode_rewards_history = deque(maxlen=100)
+        episode_successes = []
+        
+        # Prepare everything.
+        self._reset()
+        obs = self.env.reset()
+        eval_obs = None
+        if self.eval_env is not None:
+            eval_obs = self.eval_env.reset()
+        episode_reward = 0.
+        episode_step = 0
+        episodes = 0
+        step = 0
+        total_steps = 0
 
-                start_time = time.time()
+        start_time = time.time()
 
-                epoch_episode_rewards = []
-                epoch_episode_steps = []
-                epoch_actor_losses = []
-                epoch_critic_losses = []
-                epoch_adaptive_distances = []
-                eval_episode_rewards = []
-                eval_qs = []
-                epoch_actions = []
-                epoch_qs = []
-                epoch_episodes = 0
-                epoch = 0
-                while True:
-                    for _ in range(log_interval):
+        epoch_episode_rewards = []
+        epoch_episode_steps = []
+        epoch_actor_losses = []
+        epoch_critic_losses = []
+        epoch_adaptive_distances = []
+        eval_episode_rewards = []
+        eval_qs = []
+        epoch_actions = []
+        epoch_qs = []
+        epoch_episodes = 0
+        epoch = 0
+        while True:
+            for _ in range(log_interval):
 
-                        if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
-                            # Entire training loop is now running; enable IML tracing
-                            iml.prof.enable_tracing()
+                if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
+                    # Entire training loop is now running; enable IML tracing
+                    iml.prof.enable_tracing()
 
-                        iml.prof.report_progress(
-                            percent_complete=total_steps/float(total_timesteps),
-                            num_timesteps=total_steps,
-                            total_timesteps=total_timesteps)
+                iml.prof.report_progress(
+                    percent_complete=total_steps/float(total_timesteps),
+                    num_timesteps=total_steps,
+                    total_timesteps=total_timesteps)
 
-                        with iml.prof.operation('training_loop'):
-                            # Perform rollouts.
-                            for _ in range(self.nb_rollout_steps):
+                with iml.prof.operation('training_loop'):
+                    # Perform rollouts.
+                    for _ in range(self.nb_rollout_steps):
+                        if total_steps >= total_timesteps:
+                            return self
+
+                        # Predict next action.
+                        with iml.prof.operation('sample_action'):
+                            action, q_value = self._policy(obs, apply_noise=True, compute_q=True)
+                            assert action.shape == self.env.action_space.shape
+
+                            # Execute next action.
+                            if rank == 0 and self.render:
+                                self.env.render()
+
+                            # Randomly sample actions from a uniform distribution
+                            # with a probabilty self.random_exploration (used in HER + DDPG)
+                            if np.random.rand() < self.random_exploration:
+                                rescaled_action = action = self.action_space.sample()
+                            else:
+                                rescaled_action = action * np.abs(self.action_space.low)
+
+                        with iml.prof.operation('step'):
+                            new_obs, reward, done, info = self.env.step(rescaled_action)
+
+                        if writer is not None:
+                            ep_rew = np.array([reward]).reshape((1, -1))
+                            ep_done = np.array([done]).reshape((1, -1))
+                            self.episode_reward = total_episode_reward_logger(self.episode_reward, ep_rew, ep_done,
+                                                                              writer, self.num_timesteps)
+                        step += 1
+                        total_steps += 1
+                        self.num_timesteps += 1
+                        if rank == 0 and self.render:
+                            self.env.render()
+                        episode_reward += reward
+                        episode_step += 1
+
+                        # Book-keeping.
+                        epoch_actions.append(action)
+                        epoch_qs.append(q_value)
+                        self._store_transition(obs, action, reward, new_obs, done)
+                        obs = new_obs
+                        if callback is not None:
+                            # Only stop training if return value is False, not when it is None.
+                            # This is for backwards compatibility with callbacks that have no return statement.
+                            if callback(locals(), globals()) is False:
+                                return self
+
+                        if done:
+                            # Episode done.
+                            epoch_episode_rewards.append(episode_reward)
+                            episode_rewards_history.append(episode_reward)
+                            epoch_episode_steps.append(episode_step)
+                            episode_reward = 0.
+                            episode_step = 0
+                            epoch_episodes += 1
+                            episodes += 1
+
+                            maybe_is_success = info.get('is_success')
+                            if maybe_is_success is not None:
+                                episode_successes.append(float(maybe_is_success))
+
+                            self._reset()
+                            if not isinstance(self.env, VecEnv):
+                                obs = self.env.reset()
+
+                    # Train.
+                    epoch_actor_losses = []
+                    epoch_critic_losses = []
+                    epoch_adaptive_distances = []
+                    for t_train in range(self.nb_train_steps):
+                        # Not enough samples in the replay buffer
+                        if not self.replay_buffer.can_sample(self.batch_size):
+                            break
+
+                        # Adapt param noise, if necessary.
+                        if len(self.replay_buffer) >= self.batch_size and \
+                                t_train % self.param_noise_adaption_interval == 0:
+                            distance = self._adapt_param_noise()
+                            epoch_adaptive_distances.append(distance)
+
+                        # weird equation to deal with the fact the nb_train_steps will be different
+                        # to nb_rollout_steps
+                        step = (int(t_train * (self.nb_rollout_steps / self.nb_train_steps)) +
+                                self.num_timesteps - self.nb_rollout_steps)
+
+                        with iml.prof.operation('train_step'):
+                            critic_loss, actor_loss = self._train_step(step, writer, log=t_train == 0)
+                        epoch_critic_losses.append(critic_loss)
+                        epoch_actor_losses.append(actor_loss)
+                        with iml.prof.operation('update_target_network'):
+                            self._update_target_net()
+
+                    with iml.prof.operation('evaluate'):
+                        # Evaluate.
+                        eval_episode_rewards = []
+                        eval_qs = []
+                        if self.eval_env is not None:
+                            eval_episode_reward = 0.
+                            for _ in range(self.nb_eval_steps):
                                 if total_steps >= total_timesteps:
                                     return self
 
-                                # Predict next action.
-                                with iml.prof.operation('sample_action'):
-                                    action, q_value = self._policy(obs, apply_noise=True, compute_q=True)
-                                    assert action.shape == self.env.action_space.shape
+                                eval_action, eval_q = self._policy(eval_obs, apply_noise=False, compute_q=True)
+                                eval_obs, eval_r, eval_done, _ = self.eval_env.step(eval_action *
+                                                                                    np.abs(self.action_space.low))
+                                if self.render_eval:
+                                    self.eval_env.render()
+                                eval_episode_reward += eval_r
 
-                                    # Execute next action.
-                                    if rank == 0 and self.render:
-                                        self.env.render()
-
-                                    # Randomly sample actions from a uniform distribution
-                                    # with a probabilty self.random_exploration (used in HER + DDPG)
-                                    if np.random.rand() < self.random_exploration:
-                                        rescaled_action = action = self.action_space.sample()
-                                    else:
-                                        rescaled_action = action * np.abs(self.action_space.low)
-
-                                with iml.prof.operation('step'):
-                                    new_obs, reward, done, info = self.env.step(rescaled_action)
-
-                                if writer is not None:
-                                    ep_rew = np.array([reward]).reshape((1, -1))
-                                    ep_done = np.array([done]).reshape((1, -1))
-                                    self.episode_reward = total_episode_reward_logger(self.episode_reward, ep_rew, ep_done,
-                                                                                      writer, self.num_timesteps)
-                                step += 1
-                                total_steps += 1
-                                self.num_timesteps += 1
-                                if rank == 0 and self.render:
-                                    self.env.render()
-                                episode_reward += reward
-                                episode_step += 1
-
-                                # Book-keeping.
-                                epoch_actions.append(action)
-                                epoch_qs.append(q_value)
-                                self._store_transition(obs, action, reward, new_obs, done)
-                                obs = new_obs
-                                if callback is not None:
-                                    # Only stop training if return value is False, not when it is None.
-                                    # This is for backwards compatibility with callbacks that have no return statement.
-                                    if callback(locals(), globals()) is False:
-                                        return self
-
-                                if done:
-                                    # Episode done.
-                                    epoch_episode_rewards.append(episode_reward)
-                                    episode_rewards_history.append(episode_reward)
-                                    epoch_episode_steps.append(episode_step)
-                                    episode_reward = 0.
-                                    episode_step = 0
-                                    epoch_episodes += 1
-                                    episodes += 1
-
-                                    maybe_is_success = info.get('is_success')
-                                    if maybe_is_success is not None:
-                                        episode_successes.append(float(maybe_is_success))
-
-                                    self._reset()
+                                eval_qs.append(eval_q)
+                                if eval_done:
                                     if not isinstance(self.env, VecEnv):
-                                        obs = self.env.reset()
-
-                            # Train.
-                            epoch_actor_losses = []
-                            epoch_critic_losses = []
-                            epoch_adaptive_distances = []
-                            for t_train in range(self.nb_train_steps):
-                                # Not enough samples in the replay buffer
-                                if not self.replay_buffer.can_sample(self.batch_size):
-                                    break
-
-                                # Adapt param noise, if necessary.
-                                if len(self.replay_buffer) >= self.batch_size and \
-                                        t_train % self.param_noise_adaption_interval == 0:
-                                    distance = self._adapt_param_noise()
-                                    epoch_adaptive_distances.append(distance)
-
-                                # weird equation to deal with the fact the nb_train_steps will be different
-                                # to nb_rollout_steps
-                                step = (int(t_train * (self.nb_rollout_steps / self.nb_train_steps)) +
-                                        self.num_timesteps - self.nb_rollout_steps)
-
-                                with iml.prof.operation('train_step'):
-                                    critic_loss, actor_loss = self._train_step(step, writer, log=t_train == 0)
-                                epoch_critic_losses.append(critic_loss)
-                                epoch_actor_losses.append(actor_loss)
-                                with iml.prof.operation('update_target_network'):
-                                    self._update_target_net()
-
-                            with iml.prof.operation('evaluate'):
-                                # Evaluate.
-                                eval_episode_rewards = []
-                                eval_qs = []
-                                if self.eval_env is not None:
+                                        eval_obs = self.eval_env.reset()
+                                    eval_episode_rewards.append(eval_episode_reward)
+                                    eval_episode_rewards_history.append(eval_episode_reward)
                                     eval_episode_reward = 0.
-                                    for _ in range(self.nb_eval_steps):
-                                        if total_steps >= total_timesteps:
-                                            return self
 
-                                        eval_action, eval_q = self._policy(eval_obs, apply_noise=False, compute_q=True)
-                                        eval_obs, eval_r, eval_done, _ = self.eval_env.step(eval_action *
-                                                                                            np.abs(self.action_space.low))
-                                        if self.render_eval:
-                                            self.eval_env.render()
-                                        eval_episode_reward += eval_r
+            mpi_size = MPI.COMM_WORLD.Get_size()
+            # Log stats.
+            # XXX shouldn't call np.mean on variable length lists
+            duration = time.time() - start_time
+            stats = self._get_stats()
+            combined_stats = stats.copy()
+            combined_stats['rollout/return'] = np.mean(epoch_episode_rewards)
+            combined_stats['rollout/return_history'] = np.mean(episode_rewards_history)
+            combined_stats['rollout/episode_steps'] = np.mean(epoch_episode_steps)
+            combined_stats['rollout/actions_mean'] = np.mean(epoch_actions)
+            combined_stats['rollout/Q_mean'] = np.mean(epoch_qs)
+            combined_stats['train/loss_actor'] = np.mean(epoch_actor_losses)
+            combined_stats['train/loss_critic'] = np.mean(epoch_critic_losses)
+            if len(epoch_adaptive_distances) != 0:
+                combined_stats['train/param_noise_distance'] = np.mean(epoch_adaptive_distances)
+            combined_stats['total/duration'] = duration
+            combined_stats['total/steps_per_second'] = float(step) / float(duration)
+            combined_stats['total/episodes'] = episodes
+            combined_stats['rollout/episodes'] = epoch_episodes
+            combined_stats['rollout/actions_std'] = np.std(epoch_actions)
+            # Evaluation statistics.
+            if self.eval_env is not None:
+                combined_stats['eval/return'] = np.mean(eval_episode_rewards)
+                combined_stats['eval/return_history'] = np.mean(eval_episode_rewards_history)
+                combined_stats['eval/Q'] = np.mean(eval_qs)
+                combined_stats['eval/episodes'] = len(eval_episode_rewards)
 
-                                        eval_qs.append(eval_q)
-                                        if eval_done:
-                                            if not isinstance(self.env, VecEnv):
-                                                eval_obs = self.eval_env.reset()
-                                            eval_episode_rewards.append(eval_episode_reward)
-                                            eval_episode_rewards_history.append(eval_episode_reward)
-                                            eval_episode_reward = 0.
+            def as_scalar(scalar):
+                """
+                check and return the input if it is a scalar, otherwise raise ValueError
 
-                    mpi_size = MPI.COMM_WORLD.Get_size()
-                    # Log stats.
-                    # XXX shouldn't call np.mean on variable length lists
-                    duration = time.time() - start_time
-                    stats = self._get_stats()
-                    combined_stats = stats.copy()
-                    combined_stats['rollout/return'] = np.mean(epoch_episode_rewards)
-                    combined_stats['rollout/return_history'] = np.mean(episode_rewards_history)
-                    combined_stats['rollout/episode_steps'] = np.mean(epoch_episode_steps)
-                    combined_stats['rollout/actions_mean'] = np.mean(epoch_actions)
-                    combined_stats['rollout/Q_mean'] = np.mean(epoch_qs)
-                    combined_stats['train/loss_actor'] = np.mean(epoch_actor_losses)
-                    combined_stats['train/loss_critic'] = np.mean(epoch_critic_losses)
-                    if len(epoch_adaptive_distances) != 0:
-                        combined_stats['train/param_noise_distance'] = np.mean(epoch_adaptive_distances)
-                    combined_stats['total/duration'] = duration
-                    combined_stats['total/steps_per_second'] = float(step) / float(duration)
-                    combined_stats['total/episodes'] = episodes
-                    combined_stats['rollout/episodes'] = epoch_episodes
-                    combined_stats['rollout/actions_std'] = np.std(epoch_actions)
-                    # Evaluation statistics.
-                    if self.eval_env is not None:
-                        combined_stats['eval/return'] = np.mean(eval_episode_rewards)
-                        combined_stats['eval/return_history'] = np.mean(eval_episode_rewards_history)
-                        combined_stats['eval/Q'] = np.mean(eval_qs)
-                        combined_stats['eval/episodes'] = len(eval_episode_rewards)
+                :param scalar: (Any) the object to check
+                :return: (Number) the scalar if x is a scalar
+                """
+                if isinstance(scalar, np.ndarray):
+                    assert scalar.size == 1
+                    return scalar[0]
+                elif np.isscalar(scalar):
+                    return scalar
+                else:
+                    raise ValueError('expected scalar, got %s' % scalar)
 
-                    def as_scalar(scalar):
-                        """
-                        check and return the input if it is a scalar, otherwise raise ValueError
+            combined_stats_sums = MPI.COMM_WORLD.allreduce(
+                np.array([as_scalar(x) for x in combined_stats.values()]))
+            combined_stats = {k: v / mpi_size for (k, v) in zip(combined_stats.keys(), combined_stats_sums)}
 
-                        :param scalar: (Any) the object to check
-                        :return: (Number) the scalar if x is a scalar
-                        """
-                        if isinstance(scalar, np.ndarray):
-                            assert scalar.size == 1
-                            return scalar[0]
-                        elif np.isscalar(scalar):
-                            return scalar
-                        else:
-                            raise ValueError('expected scalar, got %s' % scalar)
+            # Total statistics.
+            combined_stats['total/epochs'] = epoch + 1
+            combined_stats['total/steps'] = step
 
-                    combined_stats_sums = MPI.COMM_WORLD.allreduce(
-                        np.array([as_scalar(x) for x in combined_stats.values()]))
-                    combined_stats = {k: v / mpi_size for (k, v) in zip(combined_stats.keys(), combined_stats_sums)}
-
-                    # Total statistics.
-                    combined_stats['total/epochs'] = epoch + 1
-                    combined_stats['total/steps'] = step
-
-                    for key in sorted(combined_stats.keys()):
-                        logger.record_tabular(key, combined_stats[key])
-                    if len(episode_successes) > 0:
-                        logger.logkv("success rate", np.mean(episode_successes[-100:]))
-                    logger.dump_tabular()
-                    logger.info('')
-                    logdir = logger.get_dir()
-                    if rank == 0 and logdir:
-                        if hasattr(self.env, 'get_state'):
-                            with open(os.path.join(logdir, 'env_state.pkl'), 'wb') as file_handler:
-                                pickle.dump(self.env.get_state(), file_handler)
-                        if self.eval_env and hasattr(self.eval_env, 'get_state'):
-                            with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as file_handler:
-                                pickle.dump(self.eval_env.get_state(), file_handler)
+            for key in sorted(combined_stats.keys()):
+                logger.record_tabular(key, combined_stats[key])
+            if len(episode_successes) > 0:
+                logger.logkv("success rate", np.mean(episode_successes[-100:]))
+            logger.dump_tabular()
+            logger.info('')
+            logdir = logger.get_dir()
+            if rank == 0 and logdir:
+                if hasattr(self.env, 'get_state'):
+                    with open(os.path.join(logdir, 'env_state.pkl'), 'wb') as file_handler:
+                        pickle.dump(self.env.get_state(), file_handler)
+                if self.eval_env and hasattr(self.eval_env, 'get_state'):
+                    with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as file_handler:
+                        pickle.dump(self.eval_env.get_state(), file_handler)
 
     def predict(self, observation, state=None, mask=None, deterministic=True):
         observation = np.array(observation)
