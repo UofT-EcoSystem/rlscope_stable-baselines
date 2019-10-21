@@ -331,6 +331,8 @@ class DQN(OffPolicyRLModel):
                     num_episodes = len(episode_rewards)
                     if self.verbose >= 1 and done and log_interval is not None and len(episode_rewards) % log_interval == 0:
                         logger.record_tabular("steps", self.num_timesteps)
+                        if iml.prof is not None:
+                            logger.record_tabular("train_loop_iters", iml.prof.num_training_loop_iters)
                         logger.record_tabular("episodes", num_episodes)
                         if len(episode_successes) > 0:
                             logger.logkv("success rate", np.mean(episode_successes[-100:]))
