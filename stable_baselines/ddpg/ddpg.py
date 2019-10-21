@@ -877,6 +877,15 @@ class DDPG(OffPolicyRLModel):
                 batch_size=self.batch_size,
             ))
 
+        # Set some default trace-collection termination conditions (if not set via the cmdline).
+        # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
+        #
+        # NOTE: DDPG runs nb_rollout_steps=100 of simulator steps, nb_train_steps=50 SGD updates and
+        # update target networks, and nb_eval_step=100 evaluation simulation steps.
+        # (hence, we run for fewer iterations than DQN/SAC)
+        iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
+        iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+
         while True:
             for _ in range(log_interval):
 
@@ -1025,6 +1034,8 @@ class DDPG(OffPolicyRLModel):
                 combined_stats['train/param_noise_distance'] = np.mean(epoch_adaptive_distances)
             combined_stats['total/duration'] = duration
             combined_stats['total/steps_per_second'] = float(step) / float(duration)
+            if iml.prof is not None:
+                combined_stats['total/train_loop_iters'] = iml.prof.num_training_loop_iters
             combined_stats['total/episodes'] = episodes
             combined_stats['rollout/episodes'] = epoch_episodes
             combined_stats['rollout/actions_std'] = np.std(epoch_actions)

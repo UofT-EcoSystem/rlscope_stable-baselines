@@ -380,6 +380,14 @@ class PPO2(ActorCriticRLModel):
                     n_batch=self.n_batch,
                 ))
 
+            # Set some default trace-collection termination conditions (if not set via the cmdline).
+            # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
+            #
+            # NOTE: PPO2 runs for n_env=8 * n_step=2048 per training loop iteration.
+            # (hence, we run for fewer iterations than DQN/SAC)
+            iml.prof.set_max_training_loop_iters(10, skip_if_set=True)
+            iml.prof.set_delay_training_loop_iters(3, skip_if_set=True)
+
             for update in range(1, n_updates + 1):
                 # print("> update = {update}, training step = {step}".format(update=update,
                 #                                                            step=update * self.n_batch))
@@ -456,6 +464,8 @@ class PPO2(ActorCriticRLModel):
                     if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
                         explained_var = explained_variance(values, returns)
                         logger.logkv("serial_timesteps", update * self.n_steps)
+                        if iml.prof is not None:
+                            logger.logkv("train_loop_iters", iml.prof.num_training_loop_iters)
                         logger.logkv("n_updates", update)
                         logger.logkv("total_timesteps", self.num_timesteps)
                         logger.logkv("fps", fps)

@@ -251,6 +251,14 @@ class A2C(ActorCriticRLModel):
                     n_batch=self.n_batch,
                 ))
 
+            # Set some default trace-collection termination conditions (if not set via the cmdline).
+            # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
+            #
+            # NOTE: A2C runs n_env=4 * n_step=32 per training loop iteration
+            # (hence, we run lots more iterations than DQN/SAC).
+            iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
+            iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+
             t_start = time.time()
             for update in range(1, total_timesteps // self.n_batch + 1):
 
@@ -301,6 +309,8 @@ class A2C(ActorCriticRLModel):
                         logger.record_tabular("policy_entropy", float(policy_entropy))
                         logger.record_tabular("value_loss", float(value_loss))
                         logger.record_tabular("explained_variance", float(explained_var))
+                        if iml.prof is not None:
+                            logger.record_tabular("train_loop_iters", iml.prof.num_training_loop_iters)
                         if len(ep_info_buf) > 0 and len(ep_info_buf[0]) > 0:
                             logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in ep_info_buf]))
                             logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in ep_info_buf]))

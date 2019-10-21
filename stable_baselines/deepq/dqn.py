@@ -209,6 +209,14 @@ class DQN(OffPolicyRLModel):
                     learning_starts=self.learning_starts,
                 ))
 
+            # Set some default trace-collection termination conditions (if not set via the cmdline).
+            # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
+            #
+            # NOTE: DQN and SAC both call iml.prof.report_progress after each timestep
+            # (hence, we run lots more iterations than DDPG/PPO).
+            iml.prof.set_max_training_loop_iters(10000, skip_if_set=True)
+            iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+
             for t in range(total_timesteps):
 
                 if iml.prof.delay and self.is_warmed_up() and not iml.prof.tracing_enabled:
