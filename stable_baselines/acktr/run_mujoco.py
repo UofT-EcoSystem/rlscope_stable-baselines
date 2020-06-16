@@ -22,9 +22,9 @@ def train(env_id, num_timesteps, seed):
     with tf.compat.v1.Session(config=tf.compat.v1.ConfigProto()):
         ob_dim = env.observation_space.shape[0]
         ac_dim = env.action_space.shape[0]
-        with tf.variable_scope("vf"):
+        with tf.compat.v1.variable_scope("vf"):
             value_fn = NeuralNetValueFunction(ob_dim, ac_dim)
-        with tf.variable_scope("pi"):
+        with tf.compat.v1.variable_scope("pi"):
             policy = GaussianMlpPolicy(ob_dim, ac_dim)
 
         learn(env, policy=policy, value_fn=value_fn, gamma=0.99, lam=0.97, timesteps_per_batch=2500, desired_kl=0.002,

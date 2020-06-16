@@ -47,7 +47,7 @@ def validate_probtype(probtype, pdparam):
     proba_distribution = probtype.proba_distribution_from_flat(mval_ph)
     calcloglik = tf_util.function([xval_ph, mval_ph], proba_distribution.logp(xval_ph))
     calcent = tf_util.function([mval_ph], proba_distribution.entropy())
-    xval = tf.get_default_session().run(proba_distribution.sample(), feed_dict={mval_ph: mval})
+    xval = tf.compat.v1.get_default_session().run(proba_distribution.sample(), feed_dict={mval_ph: mval})
     logliks = calcloglik(xval, mval)
     entval_ll = - logliks.mean()
     entval_ll_stderr = logliks.std() / np.sqrt(number_samples)

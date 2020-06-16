@@ -103,7 +103,7 @@ class DQN(OffPolicyRLModel):
 
     def _get_pretrain_placeholders(self):
         policy = self.step_model
-        return policy.obs_ph, tf.placeholder(tf.int32, [None]), policy.q_values
+        return policy.obs_ph, tf.compat.v1.placeholder(tf.int32, [None]), policy.q_values
 
     def setup_model(self):
 
@@ -144,7 +144,7 @@ class DQN(OffPolicyRLModel):
                 tf_util.initialize(self.sess)
                 self.update_target(sess=self.sess)
 
-                self.summary = tf.summary.merge_all()
+                self.summary = tf.compat.v1.summary.merge_all()
 
     def is_warmed_up(self, operations_seen, operations_available):
         """
@@ -332,8 +332,8 @@ class DQN(OffPolicyRLModel):
                                 # run loss backprop with summary, but once every 100 steps save the metadata
                                 # (memory, compute time, ...)
                                 if (1 + self.num_timesteps) % 100 == 0:
-                                    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                                    run_metadata = tf.RunMetadata()
+                                    run_options = tf.compat.v1.RunOptions(trace_level=tf.compat.v1.RunOptions.FULL_TRACE)
+                                    run_metadata = tf.compat.v1.RunMetadata()
                                     summary, td_errors = self._train_step(obses_t, actions, rewards, obses_tp1, obses_tp1,
                                                                           dones, weights, sess=self.sess, options=run_options,
                                                                           run_metadata=run_metadata)

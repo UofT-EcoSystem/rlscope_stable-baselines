@@ -113,7 +113,9 @@ setup(name='stable_baselines',
           'opencv-python',
           'numpy',
           'pandas',
-          'matplotlib'
+          'matplotlib',
+          'tf-slim==1.1.0',
+          'tensorflow-probability==0.10.0',
       ] + tf_dependency,
       extras_require={
         'tests': [

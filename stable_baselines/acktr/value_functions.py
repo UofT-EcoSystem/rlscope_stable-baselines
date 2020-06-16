@@ -17,8 +17,8 @@ class NeuralNetValueFunction(object):
         :param ac_dim: (int) action dimention
         :param verbose: (int) verbosity level
         """
-        obs_ph = tf.placeholder(tf.float32, shape=[None, ob_dim * 2 + ac_dim * 2 + 2])  # batch of observations
-        vtarg_n = tf.placeholder(tf.float32, shape=[None], name='vtarg')
+        obs_ph = tf.compat.v1.placeholder(tf.float32, shape=[None, ob_dim * 2 + ac_dim * 2 + 2])  # batch of observations
+        vtarg_n = tf.compat.v1.placeholder(tf.float32, shape=[None], name='vtarg')
         wd_dict = {}
         layer_1 = tf.nn.elu(dense(obs_ph, 64, "h1",
                                   weight_init=tf_util.normc_initializer(1.0), bias_init=0, weight_loss_dict=wd_dict))
@@ -27,10 +27,10 @@ class NeuralNetValueFunction(object):
         vpred_n = dense(layer_2, 1, "hfinal",
                         weight_init=tf_util.normc_initializer(1.0), bias_init=0,
                         weight_loss_dict=wd_dict)[:, 0]
-        sample_vpred_n = vpred_n + tf.random_normal(tf.shape(vpred_n))
-        wd_loss = tf.get_collection("vf_losses", None)
-        loss = tf.reduce_mean(tf.square(vpred_n - vtarg_n)) + tf.add_n(wd_loss)
-        loss_sampled = tf.reduce_mean(tf.square(vpred_n - tf.stop_gradient(sample_vpred_n)))
+        sample_vpred_n = vpred_n + tf.random.normal(tf.shape(input=vpred_n))
+        wd_loss = tf.compat.v1.get_collection("vf_losses", None)
+        loss = tf.reduce_mean(input_tensor=tf.square(vpred_n - vtarg_n)) + tf.add_n(wd_loss)
+        loss_sampled = tf.reduce_mean(input_tensor=tf.square(vpred_n - tf.stop_gradient(sample_vpred_n)))
 
         self._predict = tf_util.function([obs_ph], vpred_n)
 
@@ -39,7 +39,7 @@ class NeuralNetValueFunction(object):
                                    async_eigen_decomp=True, kfac_update=2, cold_iter=50,
                                    weight_decay_dict=wd_dict, max_grad_norm=None, verbose=verbose)
         vf_var_list = []
-        for var in tf.trainable_variables():
+        for var in tf.compat.v1.trainable_variables():
             if "vf" in var.name:
                 vf_var_list.append(var)
 

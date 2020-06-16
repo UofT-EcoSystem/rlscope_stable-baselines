@@ -14,8 +14,8 @@ def sample(logits):
     :param logits: (TensorFlow Tensor) The input probability for each action
     :return: (TensorFlow Tensor) The sampled action
     """
-    noise = tf.random_uniform(tf.shape(logits))
-    return tf.argmax(logits - tf.log(-tf.log(noise)), 1)
+    noise = tf.random.uniform(tf.shape(input=logits))
+    return tf.argmax(input=logits - tf.math.log(-tf.math.log(noise)), axis=1)
 
 
 def calc_entropy(logits):
@@ -26,11 +26,11 @@ def calc_entropy(logits):
     :return: (TensorFlow Tensor) The Entropy of the output values of the network
     """
     # Compute softmax
-    a_0 = logits - tf.reduce_max(logits, 1, keepdims=True)
+    a_0 = logits - tf.reduce_max(input_tensor=logits, axis=1, keepdims=True)
     exp_a_0 = tf.exp(a_0)
-    z_0 = tf.reduce_sum(exp_a_0, 1, keepdims=True)
+    z_0 = tf.reduce_sum(input_tensor=exp_a_0, axis=1, keepdims=True)
     p_0 = exp_a_0 / z_0
-    return tf.reduce_sum(p_0 * (tf.log(z_0) - a_0), 1)
+    return tf.reduce_sum(input_tensor=p_0 * (tf.math.log(z_0) - a_0), axis=1)
 
 
 def calc_entropy_softmax(action_proba):
@@ -40,7 +40,7 @@ def calc_entropy_softmax(action_proba):
     :param action_proba: (TensorFlow Tensor) The input probability for each action
     :return: (TensorFlow Tensor) The softmax entropy of the output values of the network
     """
-    return - tf.reduce_sum(action_proba * tf.log(action_proba + 1e-6), axis=1)
+    return - tf.reduce_sum(input_tensor=action_proba * tf.math.log(action_proba + 1e-6), axis=1)
 
 
 def mse(pred, target):
@@ -51,7 +51,7 @@ def mse(pred, target):
     :param target: (TensorFlow Tensor) The target value
     :return: (TensorFlow Tensor) The Mean squared error between prediction and target
     """
-    return tf.reduce_mean(tf.square(pred - target))
+    return tf.reduce_mean(input_tensor=tf.square(pred - target))
 
 
 def ortho_init(scale=1.0):
@@ -132,12 +132,12 @@ def conv(input_tensor, scope, *, n_filters, filter_size, stride,
     bias_var_shape = [n_filters] if one_dim_bias else [1, n_filters, 1, 1]
     n_input = input_tensor.get_shape()[channel_ax].value
     wshape = [filter_height, filter_width, n_input, n_filters]
-    with tf.variable_scope(scope):
-        weight = tf.get_variable("w", wshape, initializer=ortho_init(init_scale))
-        bias = tf.get_variable("b", bias_var_shape, initializer=tf.constant_initializer(0.0))
+    with tf.compat.v1.variable_scope(scope):
+        weight = tf.compat.v1.get_variable("w", wshape, initializer=ortho_init(init_scale))
+        bias = tf.compat.v1.get_variable("b", bias_var_shape, initializer=tf.compat.v1.constant_initializer(0.0))
         if not one_dim_bias and data_format == 'NHWC':
             bias = tf.reshape(bias, bshape)
-        return bias + tf.nn.conv2d(input_tensor, weight, strides=strides, padding=pad, data_format=data_format)
+        return bias + tf.nn.conv2d(input=input_tensor, filters=weight, strides=strides, padding=pad, data_format=data_format)
 
 
 def linear(input_tensor, scope, n_hidden, *, init_scale=1.0, init_bias=0.0):
@@ -151,10 +151,10 @@ def linear(input_tensor, scope, n_hidden, *, init_scale=1.0, init_bias=0.0):
     :param init_bias: (int) The initialization offset bias
     :return: (TensorFlow Tensor) fully connected layer
     """
-    with tf.variable_scope(scope):
+    with tf.compat.v1.variable_scope(scope):
         n_input = input_tensor.get_shape()[1].value
-        weight = tf.get_variable("w", [n_input, n_hidden], initializer=ortho_init(init_scale))
-        bias = tf.get_variable("b", [n_hidden], initializer=tf.constant_initializer(init_bias))
+        weight = tf.compat.v1.get_variable("w", [n_input, n_hidden], initializer=ortho_init(init_scale))
+        bias = tf.compat.v1.get_variable("b", [n_hidden], initializer=tf.compat.v1.constant_initializer(init_bias))
         return tf.matmul(input_tensor, weight) + bias
 
 
@@ -206,21 +206,21 @@ def lstm(input_tensor, mask_tensor, cell_state_hidden, scope, n_hidden, init_sca
     :return: (TensorFlow Tensor) LSTM cell
     """
     _, n_input = [v.value for v in input_tensor[0].get_shape()]
-    with tf.variable_scope(scope):
-        weight_x = tf.get_variable("wx", [n_input, n_hidden * 4], initializer=ortho_init(init_scale))
-        weight_h = tf.get_variable("wh", [n_hidden, n_hidden * 4], initializer=ortho_init(init_scale))
-        bias = tf.get_variable("b", [n_hidden * 4], initializer=tf.constant_initializer(0.0))
+    with tf.compat.v1.variable_scope(scope):
+        weight_x = tf.compat.v1.get_variable("wx", [n_input, n_hidden * 4], initializer=ortho_init(init_scale))
+        weight_h = tf.compat.v1.get_variable("wh", [n_hidden, n_hidden * 4], initializer=ortho_init(init_scale))
+        bias = tf.compat.v1.get_variable("b", [n_hidden * 4], initializer=tf.compat.v1.constant_initializer(0.0))
 
         if layer_norm:
             # Gain and bias of layer norm
-            gain_x = tf.get_variable("gx", [n_hidden * 4], initializer=tf.constant_initializer(1.0))
-            bias_x = tf.get_variable("bx", [n_hidden * 4], initializer=tf.constant_initializer(0.0))
+            gain_x = tf.compat.v1.get_variable("gx", [n_hidden * 4], initializer=tf.compat.v1.constant_initializer(1.0))
+            bias_x = tf.compat.v1.get_variable("bx", [n_hidden * 4], initializer=tf.compat.v1.constant_initializer(0.0))
 
-            gain_h = tf.get_variable("gh", [n_hidden * 4], initializer=tf.constant_initializer(1.0))
-            bias_h = tf.get_variable("bh", [n_hidden * 4], initializer=tf.constant_initializer(0.0))
+            gain_h = tf.compat.v1.get_variable("gh", [n_hidden * 4], initializer=tf.compat.v1.constant_initializer(1.0))
+            bias_h = tf.compat.v1.get_variable("bh", [n_hidden * 4], initializer=tf.compat.v1.constant_initializer(0.0))
 
-            gain_c = tf.get_variable("gc", [n_hidden], initializer=tf.constant_initializer(1.0))
-            bias_c = tf.get_variable("bc", [n_hidden], initializer=tf.constant_initializer(0.0))
+            gain_c = tf.compat.v1.get_variable("gc", [n_hidden], initializer=tf.compat.v1.constant_initializer(1.0))
+            bias_c = tf.compat.v1.get_variable("bc", [n_hidden], initializer=tf.compat.v1.constant_initializer(0.0))
 
     cell_state, hidden = tf.split(axis=1, num_or_size_splits=2, value=cell_state_hidden)
     for idx, (_input, mask) in enumerate(zip(input_tensor, mask_tensor)):
@@ -259,7 +259,7 @@ def _ln(input_tensor, gain, bias, epsilon=1e-5, axes=None):
     """
     if axes is None:
         axes = [1]
-    mean, variance = tf.nn.moments(input_tensor, axes=axes, keep_dims=True)
+    mean, variance = tf.nn.moments(x=input_tensor, axes=axes, keepdims=True)
     input_tensor = (input_tensor - mean) / tf.sqrt(variance + epsilon)
     input_tensor = input_tensor * gain + bias
     return input_tensor
@@ -519,7 +519,7 @@ def avg_norm(tensor):
     :param tensor: (TensorFlow Tensor) The input tensor
     :return: (TensorFlow Tensor) Average L2 normalization of the batch
     """
-    return tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.square(tensor), axis=-1)))
+    return tf.reduce_mean(input_tensor=tf.sqrt(tf.reduce_sum(input_tensor=tf.square(tensor), axis=-1)))
 
 
 def gradient_add(grad_1, grad_2, param, verbose=0):
@@ -552,8 +552,8 @@ def q_explained_variance(q_pred, q_true):
     :param q_true: (TensorFlow Tensor) The expected Q value
     :return: (TensorFlow Tensor) the explained variance of the Q value
     """
-    _, var_y = tf.nn.moments(q_true, axes=[0, 1])
-    _, var_pred = tf.nn.moments(q_true - q_pred, axes=[0, 1])
+    _, var_y = tf.nn.moments(x=q_true, axes=[0, 1])
+    _, var_pred = tf.nn.moments(x=q_true - q_pred, axes=[0, 1])
     check_shape([var_y, var_pred], [[]] * 2)
     return 1.0 - (var_pred / var_y)
 
@@ -570,7 +570,7 @@ def total_episode_reward_logger(rew_acc, rewards, masks, writer, steps):
     :return: (np.array float) the updated total running reward
     :return: (np.array float) the updated total running reward
     """
-    with tf.variable_scope("environment_info", reuse=True):
+    with tf.compat.v1.variable_scope("environment_info", reuse=True):
         for env_idx in range(rewards.shape[0]):
             dones_idx = np.sort(np.argwhere(masks[env_idx]))
 
@@ -578,11 +578,11 @@ def total_episode_reward_logger(rew_acc, rewards, masks, writer, steps):
                 rew_acc[env_idx] += sum(rewards[env_idx])
             else:
                 rew_acc[env_idx] += sum(rewards[env_idx, :dones_idx[0, 0]])
-                summary = tf.Summary(value=[tf.Summary.Value(tag="episode_reward", simple_value=rew_acc[env_idx])])
+                summary = tf.compat.v1.Summary(value=[tf.compat.v1.Summary.Value(tag="episode_reward", simple_value=rew_acc[env_idx])])
                 writer.add_summary(summary, steps + dones_idx[0, 0])
                 for k in range(1, len(dones_idx[:, 0])):
                     rew_acc[env_idx] = sum(rewards[env_idx, dones_idx[k-1, 0]:dones_idx[k, 0]])
-                    summary = tf.Summary(value=[tf.Summary.Value(tag="episode_reward", simple_value=rew_acc[env_idx])])
+                    summary = tf.compat.v1.Summary(value=[tf.compat.v1.Summary.Value(tag="episode_reward", simple_value=rew_acc[env_idx])])
                     writer.add_summary(summary, steps + dones_idx[k, 0])
                 rew_acc[env_idx] = sum(rewards[env_idx, dones_idx[-1, 0]:])
 

@@ -83,7 +83,7 @@ def learn(env, policy, value_fn, gamma, lam, timesteps_per_batch, num_timesteps,
                                epsilon=1e-2, stats_decay=0.99, async_eigen_decomp=1, cold_iter=1,
                                weight_decay_dict=policy.wd_dict, max_grad_norm=None)
     pi_var_list = []
-    for var in tf.trainable_variables():
+    for var in tf.compat.v1.trainable_variables():
         if "pi" in var.name:
             pi_var_list.append(var)
 
@@ -96,7 +96,7 @@ def learn(env, policy, value_fn, gamma, lam, timesteps_per_batch, num_timesteps,
     coord = tf.train.Coordinator()
     for queue_runner in [q_runner, value_fn.q_runner]:
         assert queue_runner is not None
-        enqueue_threads.extend(queue_runner.create_threads(tf.get_default_session(), coord=coord, start=True))
+        enqueue_threads.extend(queue_runner.create_threads(tf.compat.v1.get_default_session(), coord=coord, start=True))
 
     i = 0
     timesteps_so_far = 0
@@ -148,10 +148,10 @@ def learn(env, policy, value_fn, gamma, lam, timesteps_per_batch, num_timesteps,
         kl_loss = policy.compute_kl(ob_no, oldac_dist)
         if kl_loss > desired_kl * 2:
             logger.log("kl too high")
-            tf.assign(stepsize, tf.maximum(min_stepsize, stepsize / 1.5)).eval()
+            tf.compat.v1.assign(stepsize, tf.maximum(min_stepsize, stepsize / 1.5)).eval()
         elif kl_loss < desired_kl / 2:
             logger.log("kl too low")
-            tf.assign(stepsize, tf.minimum(max_stepsize, stepsize * 1.5)).eval()
+            tf.compat.v1.assign(stepsize, tf.minimum(max_stepsize, stepsize * 1.5)).eval()
         else:
             logger.log("kl just right!")
 

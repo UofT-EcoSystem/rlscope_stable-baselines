@@ -37,9 +37,9 @@ def switch(condition, then_expression, else_expression):
     :return: (TensorFlow Operation) the switch output
     """
     x_shape = copy.copy(then_expression.get_shape())
-    out_tensor = tf.cond(tf.cast(condition, 'bool'),
-                         lambda: then_expression,
-                         lambda: else_expression)
+    out_tensor = tf.cond(pred=tf.cast(condition, 'bool'),
+                         true_fn=lambda: then_expression,
+                         false_fn=lambda: else_expression)
     out_tensor.set_shape(x_shape)
     return out_tensor
 
@@ -74,7 +74,7 @@ def huber_loss(tensor, delta=1.0):
     :param delta: (float) huber loss delta value
     :return: (TensorFlow Tensor) huber loss output
     """
-    return tf.where(
+    return tf.compat.v1.where(
         tf.abs(tensor) < delta,
         tf.square(tensor) * 0.5,
         delta * (tf.abs(tensor) - 0.5 * delta)
@@ -147,9 +147,9 @@ def initialize(sess=None):
     :param sess: (TensorFlow Session)
     """
     if sess is None:
-        sess = tf.get_default_session()
-    new_variables = set(tf.global_variables()) - ALREADY_INITIALIZED
-    sess.run(tf.variables_initializer(new_variables))
+        sess = tf.compat.v1.get_default_session()
+    new_variables = set(tf.compat.v1.global_variables()) - ALREADY_INITIALIZED
+    sess.run(tf.compat.v1.variables_initializer(new_variables))
     ALREADY_INITIALIZED.update(new_variables)
 
 
@@ -190,7 +190,7 @@ def conv2d(input_tensor, num_filters, name, filter_size=(3, 3), stride=(1, 1),
     :param summary_tag: (str) image summary name, can be None for no image summary
     :return: (TensorFlow Tensor) 2d convolutional layer
     """
-    with tf.variable_scope(name):
+    with tf.compat.v1.variable_scope(name):
         stride_shape = [1, stride[0], stride[1], 1]
         filter_shape = [filter_size[0], filter_size[1], int(input_tensor.get_shape()[3]), num_filters]
 
@@ -204,17 +204,17 @@ def conv2d(input_tensor, num_filters, name, filter_size=(3, 3), stride=(1, 1),
         # initialize weights with random weights
         w_bound = np.sqrt(6. / (fan_in + fan_out))
 
-        weight = tf.get_variable("W", filter_shape, dtype, tf.random_uniform_initializer(-w_bound, w_bound),
+        weight = tf.compat.v1.get_variable("W", filter_shape, dtype, tf.compat.v1.random_uniform_initializer(-w_bound, w_bound),
                                  collections=collections)
-        bias = tf.get_variable("b", [1, 1, 1, num_filters], initializer=tf.zeros_initializer(),
+        bias = tf.compat.v1.get_variable("b", [1, 1, 1, num_filters], initializer=tf.compat.v1.zeros_initializer(),
                                collections=collections)
 
         if summary_tag is not None:
-            tf.summary.image(summary_tag,
-                             tf.transpose(tf.reshape(weight, [filter_size[0], filter_size[1], -1, 1]), [2, 0, 1, 3]),
+            tf.compat.v1.summary.image(summary_tag,
+                             tf.transpose(a=tf.reshape(weight, [filter_size[0], filter_size[1], -1, 1]), perm=[2, 0, 1, 3]),
                              max_outputs=10)
 
-        return tf.nn.conv2d(input_tensor, weight, stride_shape, pad) + bias
+        return tf.nn.conv2d(input=input_tensor, filters=weight, strides=stride_shape, padding=pad) + bias
 
 
 # ================================================================
@@ -292,7 +292,7 @@ class _Function(object):
     def __call__(self, *args, sess=None, **kwargs):
         assert len(args) <= len(self.inputs), "Too many arguments provided"
         if sess is None:
-            sess = tf.get_default_session()
+            sess = tf.compat.v1.get_default_session()
         feed_dict = {}
         # Update the args
         for inpt, value in zip(self.inputs, args):
@@ -350,7 +350,7 @@ def flatgrad(loss, var_list, clip_norm=None):
     :param clip_norm: (float) clip the gradients (disabled if None)
     :return: ([TensorFlow Tensor]) flattend gradient
     """
-    grads = tf.gradients(loss, var_list)
+    grads = tf.gradients(ys=loss, xs=var_list)
     if clip_norm is not None:
         grads = [tf.clip_by_norm(grad, clip_norm=clip_norm) for grad in grads]
     return tf.concat(axis=0, values=[
@@ -371,19 +371,19 @@ class SetFromFlat(object):
         shapes = list(map(var_shape, var_list))
         total_size = np.sum([intprod(shape) for shape in shapes])
 
-        self.theta = theta = tf.placeholder(dtype, [total_size])
+        self.theta = theta = tf.compat.v1.placeholder(dtype, [total_size])
         start = 0
         assigns = []
         for (shape, _var) in zip(shapes, var_list):
             size = intprod(shape)
-            assigns.append(tf.assign(_var, tf.reshape(theta[start:start + size], shape)))
+            assigns.append(tf.compat.v1.assign(_var, tf.reshape(theta[start:start + size], shape)))
             start += size
         self.operation = tf.group(*assigns)
         self.sess = sess
 
     def __call__(self, theta):
         if self.sess is None:
-            return tf.get_default_session().run(self.operation, feed_dict={self.theta: theta})
+            return tf.compat.v1.get_default_session().run(self.operation, feed_dict={self.theta: theta})
         else:
             return self.sess.run(self.operation, feed_dict={self.theta: theta})
 
@@ -401,7 +401,7 @@ class GetFlat(object):
 
     def __call__(self):
         if self.sess is None:
-            return tf.get_default_session().run(self.operation)
+            return tf.compat.v1.get_default_session().run(self.operation)
         else:
             return self.sess.run(self.operation)
 
@@ -454,13 +454,13 @@ def load_state(fname, sess=None, var_list=None):
         or a dictionary mapping names to SaveableObject`s. If ``None``, defaults to the list of all saveable objects.
     """
     if sess is None:
-        sess = tf.get_default_session()
+        sess = tf.compat.v1.get_default_session()
 
     # avoir crashing when loading the direct name without explicitly adding the root folder
     if os.path.dirname(fname) == '':
         fname = os.path.join('./', fname)
 
-    saver = tf.train.Saver(var_list=var_list)
+    saver = tf.compat.v1.train.Saver(var_list=var_list)
     saver.restore(sess, fname)
 
 
@@ -474,7 +474,7 @@ def save_state(fname, sess=None, var_list=None):
         or a dictionary mapping names to SaveableObject`s. If ``None``, defaults to the list of all saveable objects.
     """
     if sess is None:
-        sess = tf.get_default_session()
+        sess = tf.compat.v1.get_default_session()
 
     dir_name = os.path.dirname(fname)
     # avoir crashing when saving the direct name without explicitly adding the root folder
@@ -483,7 +483,7 @@ def save_state(fname, sess=None, var_list=None):
         fname = os.path.join(dir_name, fname)
     os.makedirs(dir_name, exist_ok=True)
 
-    saver = tf.train.Saver(var_list=var_list)
+    saver = tf.compat.v1.train.Saver(var_list=var_list)
     saver.save(sess, fname)
 
 
@@ -498,7 +498,7 @@ def get_trainable_vars(name):
     :param name: (str) the scope
     :return: ([TensorFlow Variable])
     """
-    return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=name)
+    return tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, scope=name)
 
 
 def get_globals_vars(name):
@@ -508,7 +508,7 @@ def get_globals_vars(name):
     :param name: (str) the scope
     :return: ([TensorFlow Variable])
     """
-    return tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=name)
+    return tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, scope=name)
 
 
 def outer_scope_getter(scope, new_scope=""):
