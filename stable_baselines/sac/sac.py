@@ -239,7 +239,7 @@ class SAC(OffPolicyRLModel):
                     if not isinstance(self.ent_coef, float):
                         ent_coef_loss = -tf.reduce_mean(
                             self.log_ent_coef * tf.stop_gradient(logp_pi + self.target_entropy))
-                        entropy_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
+                        entropy_optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
 
                     # Compute the policy loss
                     # Alternative: policy_kl_loss = tf.reduce_mean(logp_pi - min_qf_pi)
@@ -260,11 +260,11 @@ class SAC(OffPolicyRLModel):
 
                     # Policy train op
                     # (has to be separate from value train op, because min_qf_pi appears in policy_loss)
-                    policy_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
+                    policy_optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
                     policy_train_op = policy_optimizer.minimize(policy_loss, var_list=get_vars('model/pi'))
 
                     # Value train op
-                    value_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
+                    value_optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
                     values_params = get_vars('model/values_fn')
 
                     source_params = get_vars("model/values_fn/vf")

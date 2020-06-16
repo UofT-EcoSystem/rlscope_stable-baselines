@@ -32,7 +32,7 @@ def main(args):
             q_func=CustomPolicy,
             ob_space=env.observation_space,
             ac_space=env.action_space,
-            optimizer=tf.train.AdamOptimizer(learning_rate=5e-4),
+            optimizer=tf.compat.v1.train.AdamOptimizer(learning_rate=5e-4),
             sess=sess
         )
         # Create the replay buffer

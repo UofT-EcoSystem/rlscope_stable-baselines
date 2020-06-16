@@ -89,21 +89,21 @@ def test_mpi_adam():
     tests the MpiAdam object's functionality
     """
     np.random.seed(0)
-    tf.set_random_seed(0)
+    tf.compat.v1.set_random_seed(0)
 
     a_var = tf.Variable(np.random.randn(3).astype('float32'))
     b_var = tf.Variable(np.random.randn(2, 5).astype('float32'))
     loss = tf.reduce_sum(tf.square(a_var)) + tf.reduce_sum(tf.sin(b_var))
 
     learning_rate = 1e-2
-    update_op = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+    update_op = tf.compat.v1.train.AdamOptimizer(learning_rate).minimize(loss)
     do_update = tf_utils.function([], loss, updates=[update_op])
 
     tf.get_default_session().run(tf.global_variables_initializer())
     for step in range(10):
         print(step, do_update())
 
-    tf.set_random_seed(0)
+    tf.compat.v1.set_random_seed(0)
     tf.get_default_session().run(tf.global_variables_initializer())
 
     var_list = [a_var, b_var]

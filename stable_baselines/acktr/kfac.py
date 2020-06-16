@@ -938,7 +938,7 @@ class KfacOptimizer:
                     optim = tf.train.MomentumOptimizer(
                         self._lr * (1. - self._momentum), self._momentum)
 
-                    # optim = tf.train.AdamOptimizer(self._lr, epsilon=0.01)
+                    # optim = tf.compat.v1.train.AdamOptimizer(self._lr, epsilon=0.01)
 
                     def optim_op():
                         def update_optim_op():

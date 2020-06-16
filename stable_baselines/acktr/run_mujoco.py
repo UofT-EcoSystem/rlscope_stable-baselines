@@ -19,7 +19,7 @@ def train(env_id, num_timesteps, seed):
     """
     env = make_mujoco_env(env_id, seed)
 
-    with tf.Session(config=tf.ConfigProto()):
+    with tf.compat.v1.Session(config=tf.compat.v1.ConfigProto()):
         ob_dim = env.observation_space.shape[0]
         ac_dim = env.action_space.shape[0]
         with tf.variable_scope("vf"):

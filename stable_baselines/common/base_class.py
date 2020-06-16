@@ -257,7 +257,7 @@ class BaseRLModel(ABC):
                         labels=tf.stop_gradient(one_hot_actions)
                     )
                     loss = tf.reduce_mean(loss)
-                optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=adam_epsilon)
+                optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate, epsilon=adam_epsilon)
                 optim_op = optimizer.minimize(loss, var_list=self.params)
 
             self.sess.run(tf.global_variables_initializer())
