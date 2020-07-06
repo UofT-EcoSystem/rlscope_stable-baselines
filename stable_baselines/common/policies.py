@@ -317,6 +317,13 @@ class ActorCriticPolicy(BasePolicy):
         """
         raise NotImplementedError
 
+    @abstractmethod
+    def inputs(self):
+        raise NotImplementedError
+
+    @abstractmethod
+    def outputs(self):
+        raise NotImplementedError
 
 class RecurrentActorCriticPolicy(ActorCriticPolicy):
     """
@@ -364,7 +371,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicy):
     def states_ph(self):
         """tf.Tensor: placeholder for states, shape (self.n_env, ) + state_shape."""
         return self._states_ph
-    
+
     @abstractmethod
     def value(self, obs, state=None, mask=None):
         """
@@ -499,13 +506,36 @@ class LstmPolicy(RecurrentActorCriticPolicy):
                     self.pdtype.proba_distribution_from_latent(latent_policy, latent_value)
         self._setup_init()
 
+
     def step(self, obs, state=None, mask=None, deterministic=False):
+        return self._step_proba(obs, state=state, mask=mask, deterministic=deterministic)
+
+    def _step_tf(self, obs, state=None, mask=None, deterministic=False):
+        # NOTE:
         if deterministic:
+            # JAMES: for categorical, takes argmax (greedy) action.
             return self.sess.run([self.deterministic_action, self.value_flat, self.snew, self.neglogp],
                                  {self.obs_ph: obs, self.states_ph: state, self.dones_ph: mask})
         else:
+            # JAMES: for categorical, sample action using softmax probabilities.
             return self.sess.run([self.action, self.value_flat, self.snew, self.neglogp],
                                  {self.obs_ph: obs, self.states_ph: state, self.dones_ph: mask})
+
+    def _step_proba(self, obs, state=None, mask=None, deterministic=False):
+        # NOTE: we DON'T bother to keep these in TensorRT model, due to unsupported "UFF" operators:
+        # - neglogp: SoftmaxCrossEntropyWithLogits
+        # - action / deterministic_action: RandomUniform
+        policy_proba, value_flat, snew, neglogp = self.sess.run([self.policy_proba, self.value_flat, self.snew, self.neglogp],
+                                                                {self.obs_ph: obs, self.states_ph: state, self.dones_ph: mask})
+        if deterministic:
+            # TODO: only implemented this for simple categorical distribution
+            assert isinstance(self.proba_distribution, CategoricalProbabilityDistribution)
+            action = np.argmax(policy_proba, axis=-1)
+        else:
+            # JAMES: for categorical, sample action using softmax probabilities.
+            # Number of sample = batch dimension?
+            action = np.random.choice(self.ac_space, p=policy_proba, size=policy_proba.shape[0])
+        return action, value_flat, snew, neglogp
 
     def proba_step(self, obs, state=None, mask=None):
         return self.sess.run(self.policy_proba, {self.obs_ph: obs, self.states_ph: state, self.dones_ph: mask})
@@ -582,6 +612,33 @@ class FeedForwardPolicy(ActorCriticPolicy):
     def value(self, obs, state=None, mask=None):
         return self.sess.run(self.value_flat, {self.obs_ph: obs})
 
+    def inputs(self):
+        return [self.obs_ph]
+
+    def outputs(self):
+        # return [self.deterministic_action, self.value_flat, self.neglogp,
+        #         self.action, self.policy_proba]
+        # return [
+        #     self.deterministic_action,
+        #     self.value_flat,
+        #     # self.neglogp,
+        #     self.action,
+        #     # self.policy_proba,
+        # ]
+        return [
+            # self.deterministic_action,
+            # self.neglogp,
+            # self.action,
+
+
+            # Q: Does THIS generate strided_slice...? TensorRT doesn't support that with non-constant data...
+            # A: YES...what to do about that?
+            # self.value_flat,
+            self.policy_proba,
+
+            # Q: We need this also...?  For LSTM based policies anyways...
+            # self.snew,
+        ]
 
 class CnnPolicy(FeedForwardPolicy):
     """

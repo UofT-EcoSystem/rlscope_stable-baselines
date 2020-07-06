@@ -1,8 +1,19 @@
 import time
 
 import numpy as np
+import re
+
 import tensorflow as tf
-from tensorflow_probability import distributions as tf_distrib
+TF_VERSION = tf.__version__
+m = re.search(r'^(?P<major>\d+)\.(?P<minor>\d+)', TF_VERSION)
+TF_MAJOR_VERSION = int(m.group('major'))
+TF_MINOR_VERSION = int(m.group('minor'))
+del m
+
+if TF_MAJOR_VERSION > 1:
+    from tensorflow_probability import distributions as tf_distrib
+else:
+    import tensorflow.contrib.distributions as tf_distrib
 from gym.spaces import Discrete, Box
 
 from stable_baselines import logger

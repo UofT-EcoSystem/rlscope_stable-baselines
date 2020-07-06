@@ -223,12 +223,19 @@ class DQN(OffPolicyRLModel):
 
             operations_available = set([
                 'training_loop',
-                # 'q_forward',
-                # 'step',
-                # 'q_backward',
-                # 'q_update_target_network',
+                'q_forward',
+                'step',
+                'q_backward',
+                'q_update_target_network',
             ])
             operations_seen = set([])
+            def iml_prof_operation(operation):
+                should_skip = operation not in operations_available
+                op = iml.prof.operation(operation, skip=should_skip)
+                if not should_skip:
+                    operations_seen.add(operation)
+                return op
+
             for t in range(total_timesteps):
 
                 if iml.prof.delay and self.is_warmed_up(operations_seen, operations_available) and not iml.prof.tracing_enabled:
@@ -247,9 +254,9 @@ class DQN(OffPolicyRLModel):
                 # stacks have been visited...? Not really...once RangeTree reaches its "peak size",
                 # we should have visited everything.  We can determine "peak size" during warmup period....
                 # (that's what we're currently doing though...)
-                if t % 1000 == 0:
-                    print(f"RLS: operations_seen = {operations_seen}")
-                    print(f"  waiting for = {operations_available.difference(operations_seen)}")
+                # if t % 1000 == 0:
+                print(f"RLS: @ t={t}: operations_seen = {operations_seen}")
+                print(f"  waiting for = {operations_available.difference(operations_seen)}")
                 if operations_seen == operations_available:
                     operations_seen.clear()
                     iml.prof.report_progress(
@@ -257,8 +264,7 @@ class DQN(OffPolicyRLModel):
                         num_timesteps=t,
                         total_timesteps=total_timesteps)
 
-                with iml.prof.operation('training_loop'):
-                    operations_seen.add('training_loop')
+                with iml_prof_operation('training_loop'):
                     if self.verbose >= 1:
                         bar.update(t)
                     if callback is not None:
@@ -266,8 +272,7 @@ class DQN(OffPolicyRLModel):
                         # compatibility with callbacks that have no return statement.
                         if callback(locals(), globals()) is False:
                             break
-                    with iml.prof.operation('q_forward', skip=True):
-                        # operations_seen.add('q_forward')
+                    with iml_prof_operation('q_forward'):
                         # Take action and update exploration to the newest value
                         kwargs = {}
                         if not self.param_noise:
@@ -289,8 +294,7 @@ class DQN(OffPolicyRLModel):
                             action = self.act(np.array(obs)[None], update_eps=update_eps, **kwargs)[0]
                         env_action = action
                         reset = False
-                    with iml.prof.operation('step', skip=True):
-                        # operations_seen.add('step')
+                    with iml_prof_operation('step'):
                         new_obs, rew, done, info = self.env.step(env_action)
                     # Store transition in the replay buffer.
                     self.replay_buffer.add(obs, action, rew, new_obs, float(done))
@@ -318,8 +322,7 @@ class DQN(OffPolicyRLModel):
                     if can_sample and self.num_timesteps > self.learning_starts \
                         and self.num_timesteps % self.train_freq == 0:
                         # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
-                        with iml.prof.operation('q_backward', skip=True):
-                            # operations_seen.add('q_backward')
+                        with iml_prof_operation('q_backward'):
                             if self.prioritized_replay:
                                 experience = self.replay_buffer.sample(self.batch_size,
                                                                        beta=self.beta_schedule.value(self.num_timesteps))
@@ -352,8 +355,7 @@ class DQN(OffPolicyRLModel):
 
                     if can_sample and self.num_timesteps > self.learning_starts and \
                             self.num_timesteps % self.target_network_update_freq == 0:
-                        with iml.prof.operation('q_update_target_network', skip=True):
-                            # operations_seen.add('q_update_target_network')
+                        with iml_prof_operation('q_update_target_network'):
                             # Update target network periodically.
                             self.update_target(sess=self.sess)
 

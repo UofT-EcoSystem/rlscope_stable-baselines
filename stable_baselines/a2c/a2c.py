@@ -172,6 +172,12 @@ class A2C(ActorCriticRLModel):
 
                 self.summary = tf.compat.v1.summary.merge_all()
 
+    def inputs(self):
+        return self.step_model.inputs()
+
+    def outputs(self):
+        return self.step_model.outputs()
+
     def _train_step(self, obs, states, rewards, masks, actions, values, update, writer=None):
         """
         applies a training step to the model

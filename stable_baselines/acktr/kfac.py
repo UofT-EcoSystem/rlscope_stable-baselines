@@ -581,7 +581,7 @@ class KfacOptimizer:
                     for key in ['fprop_concat_stats', 'bprop_concat_stats']:
                         for stats_var in stats[var][key]:
                             if stats_var not in tmp_eigen_cache:
-                                stats_dim = stats_var.get_shape()[1].value
+                                stats_dim = stats_var.get_shape()[1]
                                 eigen_values = tf.Variable(tf.ones(
                                     [stats_dim]), name='KFAC_FAC/' + stats_var.name.split(':')[0] + '/e',
                                     trainable=False)

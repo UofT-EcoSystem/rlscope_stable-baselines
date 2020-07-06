@@ -565,6 +565,14 @@ class ActorCriticRLModel(BaseRLModel):
         pass
 
     @abstractmethod
+    def inputs(self):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def outputs(self):
+        raise NotImplementedError
+
+    @abstractmethod
     def learn(self, total_timesteps, callback=None, seed=None,
               log_interval=100, tb_log_name="run", reset_num_timesteps=True):
         pass
