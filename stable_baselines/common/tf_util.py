@@ -97,11 +97,12 @@ def make_session(num_cpu=None, make_default=False, graph=None):
     if num_cpu is None:
         num_cpu = int(os.getenv('RCALL_NUM_CPU', multiprocessing.cpu_count()))
     tf_config = tf.compat.v1.ConfigProto(
-        allow_soft_placement=True,
+        # allow_soft_placement=True,
         # IML: Verify operations are truly GPU-bound and not CPU-bound.
-        # log_device_placement=True,
+        log_device_placement=True,
         inter_op_parallelism_threads=num_cpu,
         intra_op_parallelism_threads=num_cpu)
+    # IML: Allow multiple users to use the TensorFlow API.
     # Prevent tensorflow from taking all the gpu memory
     tf_config.gpu_options.allow_growth = True
     if make_default:

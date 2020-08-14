@@ -695,11 +695,17 @@ class DDPG(OffPolicyRLModel):
                                                                                             td_map)
             writer.add_summary(summary, step)
         else:
+            # IML: Compute the actor gradients and critic gradients as numpy array using sess.run(...)
             actor_grads, actor_loss, critic_grads, critic_loss = self.sess.run(ops, td_map)
 
+        # IML: Use optimizer to apply gradient update.
+        # Q: How can we make this all "one sess.run(...)" call...?
+        # I expect the optimizer to just be a "graph fragment", so we sort of just want to "join the fragments"...
         self.actor_optimizer.update(actor_grads, learning_rate=self.actor_lr)
         self.critic_optimizer.update(critic_grads, learning_rate=self.critic_lr)
 
+        # IML: return the loss values
+        # NOTE: these are used for logging, not needed by algorithm.
         return critic_loss, actor_loss
 
     def _initialize(self, sess):
@@ -1084,6 +1090,90 @@ class DDPG(OffPolicyRLModel):
                 if self.eval_env and hasattr(self.eval_env, 'get_state'):
                     with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as file_handler:
                         pickle.dump(self.eval_env.get_state(), file_handler)
+
+    # def microbench_backprop(self, args):
+    #     """
+    #     PSEUDOCODE:
+    #
+    #     use_gpu_data / skip_cpu_to_gpu_copy = True/False
+    #     use_tf_while_loop = True/False
+    #     # ASSUMING we can actually implement replay-buffer from python...
+    #     use_gpu_replay_buffer = True/False
+    #     # NOTE: we should try training steps that are similar to the number
+    #     # of training steps used by all the different algorithm implementations,
+    #     # and also try training steps needed to "max out" the training step throughput.
+    #     max_training_steps = ...
+    #
+    #     # NOTE: we may wish to try lots of smaller increments.
+    #     for training_steps in powers_of_2(max=max_training_steps):
+    #         if use_gpu_data:
+    #             with tf.device('GPU:0'):
+    #                 data = tf.identity(tf.uniform.random(...), device='GPU:0')
+    #                 assert data is on GPU
+    #         else:
+    #             # Typical input for RL algorithm implementations: numpy array on CPU.
+    #             data = np.random(...)
+    #
+    #         if not use_tf_while_loop:
+    #             # Use regular old python for-loop
+    #             for t in range(training_steps):
+    #                 self.train_step(data)
+    #         else:
+    #             # Use tf.while_loop
+    #             i = tf.constant(0)
+    #             cond = lambda i: tf.less(i, training_steps)
+    #             body = lambda i: (tf.add(i, 1), data)
+    #             def body(i, data):
+    #                 # NOTE: make sure we DON'T invoke sess.run(...) here!
+    #                 # We just want to setup a computational graph that takes "data" as input.
+    #                 # Q: How do we "feed" data into the operation?
+    #                 self.train_step_operation(data)
+    #                 return tf.add(i, 1), data
+    #             # Q: How to ensure train_steps are executed in-order...? Set parallel_iterations=1?
+    #             # Or use return value from self.train_step_operation(data) as input for next iteration?
+    #             # How to debug this?
+    #             training_iterations = tf.while_loop(cond, body, [i, data])
+    #             assert training_iterations is not evaluated / eager
+    #             # Empty feed dict, since "data" should be a node in the computational graph returned by self.train_step_operation(data)?
+    #             feed_dict = dict()
+    #             sess.run(training_iterations, feed_dict)
+    #     """
+    #     # NOTE: we may wish to try lots of smaller increments.
+    #     # for training_steps in powers_of_2(max=max_training_steps):
+    #     training_steps = args.max_training_steps
+    #     if args.use_gpu_data:
+    #         with tf.device('GPU:0'):
+    #             data = tf.identity(tf.uniform.random(...), device='GPU:0')
+    #             assert data is on GPU
+    #     else:
+    #         # Typical input for RL algorithm implementations: numpy array on CPU.
+    #         data = np.random(...)
+    #         np.random.uniform(size=(2,2))
+    #
+    #
+    #     if not use_tf_while_loop:
+    #         # Use regular old python for-loop
+    #         for t in range(training_steps):
+    #             self.train_step(data)
+    #     else:
+    #         # Use tf.while_loop
+    #         i = tf.constant(0)
+    #         cond = lambda i: tf.less(i, training_steps)
+    #         body = lambda i: (tf.add(i, 1), data)
+    #         def body(i, data):
+    #             # NOTE: make sure we DON'T invoke sess.run(...) here!
+    #             # We just want to setup a computational graph that takes "data" as input.
+    #             # Q: How do we "feed" data into the operation?
+    #             self.train_step_operation(data)
+    #             return tf.add(i, 1), data
+    #         # Q: How to ensure train_steps are executed in-order...? Set parallel_iterations=1?
+    #         # Or use return value from self.train_step_operation(data) as input for next iteration?
+    #         # How to debug this?
+    #         training_iterations = tf.while_loop(cond, body, [i, data])
+    #         assert training_iterations is not evaluated / eager
+    #         # Empty feed dict, since "data" should be a node in the computational graph returned by self.train_step_operation(data)?
+    #         feed_dict = dict()
+    #         sess.run(training_iterations, feed_dict)
 
     def predict(self, observation, state=None, mask=None, deterministic=True):
         observation = np.array(observation)
