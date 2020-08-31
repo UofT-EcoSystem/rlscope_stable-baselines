@@ -583,6 +583,8 @@ class FeedForwardPolicy(ActorCriticPolicy):
             if layers is None:
                 layers = [64, 64]
             net_arch = [dict(vf=layers, pi=layers)]
+          
+        self.net_arch = net_arch
 
         with tf.compat.v1.variable_scope("model", reuse=reuse):
             if feature_extraction == "cnn":

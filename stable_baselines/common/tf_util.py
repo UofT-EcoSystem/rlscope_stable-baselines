@@ -104,7 +104,7 @@ def make_session(num_cpu=None, make_default=False, graph=None):
         intra_op_parallelism_threads=num_cpu)
     # IML: Allow multiple users to use the TensorFlow API.
     # Prevent tensorflow from taking all the gpu memory
-    tf_config.gpu_options.allow_growth = True
+    # tf_config.gpu_options.allow_growth = True
     if make_default:
         return tf.compat.v1.InteractiveSession(config=tf_config, graph=graph)
     else:

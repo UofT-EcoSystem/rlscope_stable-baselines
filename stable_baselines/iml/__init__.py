@@ -99,3 +99,5 @@ class MyBulletClient(object):
         ]:  # A temporary hack for now.
             attribute = functools.partial(attribute, physicsClientId=self._client)
         return attribute
+
+

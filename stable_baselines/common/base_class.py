@@ -564,11 +564,11 @@ class ActorCriticRLModel(BaseRLModel):
     def setup_model(self):
         pass
 
-    @abstractmethod
+    # @abstractmethod
     def inputs(self):
         raise NotImplementedError
-    
-    @abstractmethod
+
+    # @abstractmethod
     def outputs(self):
         raise NotImplementedError
 
