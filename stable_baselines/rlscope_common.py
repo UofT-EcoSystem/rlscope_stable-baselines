@@ -2,7 +2,7 @@ import textwrap
 
 import iml_profiler.api as iml
 
-def before_each_iteration(iteration, num_iterations):
+def before_each_iteration(iteration, num_iterations, is_warmed_up=None):
   if iml.prof.delay and iml_is_warmed_up() and not iml.prof.tracing_enabled:
     # Entire training loop is now running; enable IML tracing
     iml.prof.enable_tracing()
@@ -14,12 +14,14 @@ def before_each_iteration(iteration, num_iterations):
     iml.logger.info(textwrap.dedent("""\
         RLS: @ t={iteration}: OPERATIONS_SEEN = {OPERATIONS_SEEN}
           waiting for = {waiting_for}
+          is_warmed_up = {is_warmed_up}
         """.format(
       iteration=iteration,
       OPERATIONS_SEEN=OPERATIONS_SEEN,
       waiting_for=OPERATIONS_AVAILABLE.difference(OPERATIONS_SEEN),
+      is_warmed_up=is_warmed_up,
     )).rstrip())
-  if OPERATIONS_SEEN == OPERATIONS_AVAILABLE:
+  if OPERATIONS_SEEN == OPERATIONS_AVAILABLE and ( is_warmed_up is None or is_warmed_up ):
     OPERATIONS_SEEN.clear()
     iml.prof.report_progress(
       percent_complete=iteration/float(num_iterations),

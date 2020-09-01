@@ -12,6 +12,8 @@ from stable_baselines.common.buffers import ReplayBuffer, PrioritizedReplayBuffe
 from stable_baselines.deepq.build_graph import build_train
 from stable_baselines.deepq.policies import DQNPolicy
 
+import iml_profiler.api as iml
+from stable_baselines import rlscope_common
 
 class DQN(OffPolicyRLModel):
     """
@@ -149,6 +151,15 @@ class DQN(OffPolicyRLModel):
 
                 self.summary = tf.summary.merge_all()
 
+    def is_warmed_up(self):
+        """
+        Return true once we are executing the full training-loop.
+
+        :return:
+        """
+        can_sample = self.replay_buffer.can_sample(self.batch_size)
+        return can_sample and self.num_timesteps > self.learning_starts
+
     def learn(self, total_timesteps, callback=None, log_interval=100, tb_log_name="DQN",
               reset_num_timesteps=True, replay_wrapper=None):
 
@@ -194,134 +205,163 @@ class DQN(OffPolicyRLModel):
             if self._vec_normalize_env is not None:
                 obs_ = self._vec_normalize_env.get_original_obs().squeeze()
 
-            for _ in range(total_timesteps):
-                # Take action and update exploration to the newest value
-                kwargs = {}
-                if not self.param_noise:
-                    update_eps = self.exploration.value(self.num_timesteps)
-                    update_param_noise_threshold = 0.
-                else:
-                    update_eps = 0.
-                    # Compute the threshold such that the KL divergence between perturbed and non-perturbed
-                    # policy is comparable to eps-greedy exploration with eps = exploration.value(t).
-                    # See Appendix C.1 in Parameter Space Noise for Exploration, Plappert et al., 2017
-                    # for detailed explanation.
-                    update_param_noise_threshold = \
-                        -np.log(1. - self.exploration.value(self.num_timesteps) +
-                                self.exploration.value(self.num_timesteps) / float(self.env.action_space.n))
-                    kwargs['reset'] = reset
-                    kwargs['update_param_noise_threshold'] = update_param_noise_threshold
-                    kwargs['update_param_noise_scale'] = True
-                with self.sess.as_default():
-                    action = self.act(np.array(obs)[None], update_eps=update_eps, **kwargs)[0]
-                env_action = action
-                reset = False
-                new_obs, rew, done, info = self.env.step(env_action)
+            # Set some default trace-collection termination conditions (if not set via the cmdline).
+            # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
+            #
+            # NOTE: DQN and SAC both call iml.prof.report_progress after each timestep
+            # (hence, we run lots more iterations than DDPG/PPO).
+            #iml.prof.set_max_training_loop_iters(10000, skip_if_set=True)
+            #iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+            iml.prof.set_max_passes(10, skip_if_set=True)
+            # 1 configuration pass.
+            iml.prof.set_delay_passes(1, skip_if_set=True)
 
-                self.num_timesteps += 1
+            rlscope_common.iml_register_operations({
+                'training_loop',
+                'q_forward',
+                'step',
+                'q_backward',
+                'q_update_target_network',
+            })
 
-                # Stop training if return value is False
-                callback.update_locals(locals())
-                if callback.on_step() is False:
-                    break
+            for t in range(total_timesteps):
 
-                # Store only the unnormalized version
-                if self._vec_normalize_env is not None:
-                    new_obs_ = self._vec_normalize_env.get_original_obs().squeeze()
-                    reward_ = self._vec_normalize_env.get_original_reward().squeeze()
-                else:
-                    # Avoid changing the original ones
-                    obs_, new_obs_, reward_ = obs, new_obs, rew
-                # Store transition in the replay buffer.
-                self.replay_buffer_add(obs_, action, reward_, new_obs_, done, info)
-                obs = new_obs
-                # Save the unnormalized observation
-                if self._vec_normalize_env is not None:
-                    obs_ = new_obs_
+                rlscope_common.before_each_iteration(
+                    t, total_timesteps,
+                    is_warmed_up=self.is_warmed_up())
 
-                if writer is not None:
-                    ep_rew = np.array([reward_]).reshape((1, -1))
-                    ep_done = np.array([done]).reshape((1, -1))
-                    tf_util.total_episode_reward_logger(self.episode_reward, ep_rew, ep_done, writer,
-                                                        self.num_timesteps)
+                with rlscope_common.iml_prof_operation('training_loop'):
 
-                episode_rewards[-1] += reward_
-                if done:
-                    maybe_is_success = info.get('is_success')
-                    if maybe_is_success is not None:
-                        episode_successes.append(float(maybe_is_success))
-                    if not isinstance(self.env, VecEnv):
-                        obs = self.env.reset()
-                    episode_rewards.append(0.0)
-                    reset = True
+                    with rlscope_common.iml_prof_operation('q_forward'):
+                        # Take action and update exploration to the newest value
+                        kwargs = {}
+                        if not self.param_noise:
+                            update_eps = self.exploration.value(self.num_timesteps)
+                            update_param_noise_threshold = 0.
+                        else:
+                            update_eps = 0.
+                            # Compute the threshold such that the KL divergence between perturbed and non-perturbed
+                            # policy is comparable to eps-greedy exploration with eps = exploration.value(t).
+                            # See Appendix C.1 in Parameter Space Noise for Exploration, Plappert et al., 2017
+                            # for detailed explanation.
+                            update_param_noise_threshold = \
+                                -np.log(1. - self.exploration.value(self.num_timesteps) +
+                                        self.exploration.value(self.num_timesteps) / float(self.env.action_space.n))
+                            kwargs['reset'] = reset
+                            kwargs['update_param_noise_threshold'] = update_param_noise_threshold
+                            kwargs['update_param_noise_scale'] = True
+                        with self.sess.as_default():
+                            action = self.act(np.array(obs)[None], update_eps=update_eps, **kwargs)[0]
+                        env_action = action
+                        reset = False
+                    with rlscope_common.iml_prof_operation('step'):
+                        new_obs, rew, done, info = self.env.step(env_action)
 
-                # Do not train if the warmup phase is not over
-                # or if there are not enough samples in the replay buffer
-                can_sample = self.replay_buffer.can_sample(self.batch_size)
-                if can_sample and self.num_timesteps > self.learning_starts \
-                        and self.num_timesteps % self.train_freq == 0:
+                    self.num_timesteps += 1
 
-                    callback.on_rollout_end()
-                    # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
-                    # pytype:disable=bad-unpacking
-                    if self.prioritized_replay:
-                        assert self.beta_schedule is not None, \
-                               "BUG: should be LinearSchedule when self.prioritized_replay True"
-                        experience = self.replay_buffer.sample(self.batch_size,
-                                                               beta=self.beta_schedule.value(self.num_timesteps),
-                                                               env=self._vec_normalize_env)
-                        (obses_t, actions, rewards, obses_tp1, dones, weights, batch_idxes) = experience
+                    # Stop training if return value is False
+                    callback.update_locals(locals())
+                    if callback.on_step() is False:
+                        break
+
+                    # Store only the unnormalized version
+                    if self._vec_normalize_env is not None:
+                        new_obs_ = self._vec_normalize_env.get_original_obs().squeeze()
+                        reward_ = self._vec_normalize_env.get_original_reward().squeeze()
                     else:
-                        obses_t, actions, rewards, obses_tp1, dones = self.replay_buffer.sample(self.batch_size,
-                                                                                                env=self._vec_normalize_env)
-                        weights, batch_idxes = np.ones_like(rewards), None
-                    # pytype:enable=bad-unpacking
+                        # Avoid changing the original ones
+                        obs_, new_obs_, reward_ = obs, new_obs, rew
+                    # Store transition in the replay buffer.
+                    self.replay_buffer_add(obs_, action, reward_, new_obs_, done, info)
+                    obs = new_obs
+                    # Save the unnormalized observation
+                    if self._vec_normalize_env is not None:
+                        obs_ = new_obs_
 
                     if writer is not None:
-                        # run loss backprop with summary, but once every 100 steps save the metadata
-                        # (memory, compute time, ...)
-                        if (1 + self.num_timesteps) % 100 == 0:
-                            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                            run_metadata = tf.RunMetadata()
-                            summary, td_errors = self._train_step(obses_t, actions, rewards, obses_tp1, obses_tp1,
-                                                                  dones, weights, sess=self.sess, options=run_options,
-                                                                  run_metadata=run_metadata)
-                            writer.add_run_metadata(run_metadata, 'step%d' % self.num_timesteps)
-                        else:
-                            summary, td_errors = self._train_step(obses_t, actions, rewards, obses_tp1, obses_tp1,
-                                                                  dones, weights, sess=self.sess)
-                        writer.add_summary(summary, self.num_timesteps)
+                        ep_rew = np.array([reward_]).reshape((1, -1))
+                        ep_done = np.array([done]).reshape((1, -1))
+                        tf_util.total_episode_reward_logger(self.episode_reward, ep_rew, ep_done, writer,
+                                                            self.num_timesteps)
+
+                    episode_rewards[-1] += reward_
+                    if done:
+                        maybe_is_success = info.get('is_success')
+                        if maybe_is_success is not None:
+                            episode_successes.append(float(maybe_is_success))
+                        if not isinstance(self.env, VecEnv):
+                            obs = self.env.reset()
+                        episode_rewards.append(0.0)
+                        reset = True
+
+                    # Do not train if the warmup phase is not over
+                    # or if there are not enough samples in the replay buffer
+                    can_sample = self.replay_buffer.can_sample(self.batch_size)
+                    if can_sample and self.num_timesteps > self.learning_starts \
+                            and self.num_timesteps % self.train_freq == 0:
+                        with rlscope_common.iml_prof_operation('q_backward'):
+                            callback.on_rollout_end()
+                            # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
+                            # pytype:disable=bad-unpacking
+                            if self.prioritized_replay:
+                                assert self.beta_schedule is not None, \
+                                       "BUG: should be LinearSchedule when self.prioritized_replay True"
+                                experience = self.replay_buffer.sample(self.batch_size,
+                                                                       beta=self.beta_schedule.value(self.num_timesteps),
+                                                                       env=self._vec_normalize_env)
+                                (obses_t, actions, rewards, obses_tp1, dones, weights, batch_idxes) = experience
+                            else:
+                                obses_t, actions, rewards, obses_tp1, dones = self.replay_buffer.sample(self.batch_size,
+                                                                                                        env=self._vec_normalize_env)
+                                weights, batch_idxes = np.ones_like(rewards), None
+                            # pytype:enable=bad-unpacking
+
+                            if writer is not None:
+                                # run loss backprop with summary, but once every 100 steps save the metadata
+                                # (memory, compute time, ...)
+                                if (1 + self.num_timesteps) % 100 == 0:
+                                    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                                    run_metadata = tf.RunMetadata()
+                                    summary, td_errors = self._train_step(obses_t, actions, rewards, obses_tp1, obses_tp1,
+                                                                          dones, weights, sess=self.sess, options=run_options,
+                                                                          run_metadata=run_metadata)
+                                    writer.add_run_metadata(run_metadata, 'step%d' % self.num_timesteps)
+                                else:
+                                    summary, td_errors = self._train_step(obses_t, actions, rewards, obses_tp1, obses_tp1,
+                                                                          dones, weights, sess=self.sess)
+                                writer.add_summary(summary, self.num_timesteps)
+                            else:
+                                _, td_errors = self._train_step(obses_t, actions, rewards, obses_tp1, obses_tp1, dones, weights,
+                                                                sess=self.sess)
+
+                            if self.prioritized_replay:
+                                new_priorities = np.abs(td_errors) + self.prioritized_replay_eps
+                                assert isinstance(self.replay_buffer, PrioritizedReplayBuffer)
+                                self.replay_buffer.update_priorities(batch_idxes, new_priorities)
+
+                            callback.on_rollout_start()
+
+                    if can_sample and self.num_timesteps > self.learning_starts and \
+                            self.num_timesteps % self.target_network_update_freq == 0:
+                        with rlscope_common.iml_prof_operation('q_update_target_network'):
+                            # Update target network periodically.
+                            self.update_target(sess=self.sess)
+
+                    if len(episode_rewards[-101:-1]) == 0:
+                        mean_100ep_reward = -np.inf
                     else:
-                        _, td_errors = self._train_step(obses_t, actions, rewards, obses_tp1, obses_tp1, dones, weights,
-                                                        sess=self.sess)
+                        mean_100ep_reward = round(float(np.mean(episode_rewards[-101:-1])), 1)
 
-                    if self.prioritized_replay:
-                        new_priorities = np.abs(td_errors) + self.prioritized_replay_eps
-                        assert isinstance(self.replay_buffer, PrioritizedReplayBuffer)
-                        self.replay_buffer.update_priorities(batch_idxes, new_priorities)
-
-                    callback.on_rollout_start()
-
-                if can_sample and self.num_timesteps > self.learning_starts and \
-                        self.num_timesteps % self.target_network_update_freq == 0:
-                    # Update target network periodically.
-                    self.update_target(sess=self.sess)
-
-                if len(episode_rewards[-101:-1]) == 0:
-                    mean_100ep_reward = -np.inf
-                else:
-                    mean_100ep_reward = round(float(np.mean(episode_rewards[-101:-1])), 1)
-
-                num_episodes = len(episode_rewards)
-                if self.verbose >= 1 and done and log_interval is not None and len(episode_rewards) % log_interval == 0:
-                    logger.record_tabular("steps", self.num_timesteps)
-                    logger.record_tabular("episodes", num_episodes)
-                    if len(episode_successes) > 0:
-                        logger.logkv("success rate", np.mean(episode_successes[-100:]))
-                    logger.record_tabular("mean 100 episode reward", mean_100ep_reward)
-                    logger.record_tabular("% time spent exploring",
-                                          int(100 * self.exploration.value(self.num_timesteps)))
-                    logger.dump_tabular()
+                    num_episodes = len(episode_rewards)
+                    if self.verbose >= 1 and done and log_interval is not None and len(episode_rewards) % log_interval == 0:
+                        logger.record_tabular("steps", self.num_timesteps)
+                        logger.record_tabular("episodes", num_episodes)
+                        if len(episode_successes) > 0:
+                            logger.logkv("success rate", np.mean(episode_successes[-100:]))
+                        logger.record_tabular("mean 100 episode reward", mean_100ep_reward)
+                        logger.record_tabular("% time spent exploring",
+                                              int(100 * self.exploration.value(self.num_timesteps)))
+                        logger.dump_tabular()
 
         callback.on_training_end()
         return self

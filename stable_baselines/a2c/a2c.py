@@ -12,6 +12,8 @@ from stable_baselines.common.schedules import Scheduler
 from stable_baselines.common.tf_util import mse, total_episode_reward_logger
 from stable_baselines.common.math_util import safe_mean
 
+import iml_profiler.api as iml
+from stable_baselines import rlscope_common
 
 def discount_with_dones(rewards, dones, gamma):
     """
@@ -241,11 +243,42 @@ class A2C(ActorCriticRLModel):
 
         return policy_loss, value_loss, policy_entropy
 
+    def is_warmed_up(self):
+        """
+        Return true once we are executing the full training-loop.
+
+        :return:
+        """
+        return True
+
     def learn(self, total_timesteps, callback=None, log_interval=100, tb_log_name="A2C",
               reset_num_timesteps=True):
 
         new_tb_log = self._init_num_timesteps(reset_num_timesteps)
         callback = self._init_callback(callback)
+
+        n_updates = total_timesteps // self.n_batch
+        if n_updates == 0:
+            print(("IML WARNING: training loop won't get traced; you need to use a "
+                   "larger number for --n-timesteps (currently {t}); preferably some multiple of {n_batch}").format(
+                t=total_timesteps,
+                n_batch=self.n_batch,
+            ))
+
+        # Set some default trace-collection termination conditions (if not set via the cmdline).
+        # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
+        #
+        # NOTE: A2C runs n_env=4 * n_step=32 per training loop iteration
+        # (hence, we run lots more iterations than DQN/SAC).
+        iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
+        iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+
+        rlscope_common.iml_register_operations({
+            'training_loop',
+            'sample_action',
+            'step',
+            'train_step',
+        })
 
         with SetVerbosity(self.verbose), TensorboardWriter(self.graph, self.tensorboard_log, tb_log_name, new_tb_log) \
                 as writer:
@@ -258,42 +291,48 @@ class A2C(ActorCriticRLModel):
 
             for update in range(1, total_timesteps // self.n_batch + 1):
 
-                callback.on_rollout_start()
-                # true_reward is the reward without discount
-                rollout = self.runner.run(callback)
-                # unpack
-                obs, states, rewards, masks, actions, values, ep_infos, true_reward = rollout
-                callback.update_locals(locals())
-                callback.on_rollout_end()
+                rlscope_common.before_each_iteration(
+                    update * self.n_batch, total_timesteps,
+                    is_warmed_up=self.is_warmed_up())
 
-                # Early stopping due to the callback
-                if not self.runner.continue_training:
-                    break
+                with rlscope_common.iml_prof_operation('training_loop'):
+                    callback.on_rollout_start()
+                    # true_reward is the reward without discount
+                    rollout = self.runner.run(callback)
+                    # unpack
+                    obs, states, rewards, masks, actions, values, ep_infos, true_reward = rollout
+                    callback.update_locals(locals())
+                    callback.on_rollout_end()
 
-                self.ep_info_buf.extend(ep_infos)
-                _, value_loss, policy_entropy = self._train_step(obs, states, rewards, masks, actions, values,
-                                                                 self.num_timesteps // self.n_batch, writer)
-                n_seconds = time.time() - t_start
-                fps = int((update * self.n_batch) / n_seconds)
+                    # Early stopping due to the callback
+                    if not self.runner.continue_training:
+                        break
 
-                if writer is not None:
-                    total_episode_reward_logger(self.episode_reward,
-                                                true_reward.reshape((self.n_envs, self.n_steps)),
-                                                masks.reshape((self.n_envs, self.n_steps)),
-                                                writer, self.num_timesteps)
+                    self.ep_info_buf.extend(ep_infos)
+                    with rlscope_common.iml_prof_operation('train_step'):
+                        _, value_loss, policy_entropy = self._train_step(obs, states, rewards, masks, actions, values,
+                                                                         self.num_timesteps // self.n_batch, writer)
+                    n_seconds = time.time() - t_start
+                    fps = int((update * self.n_batch) / n_seconds)
 
-                if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
-                    explained_var = explained_variance(values, rewards)
-                    logger.record_tabular("nupdates", update)
-                    logger.record_tabular("total_timesteps", self.num_timesteps)
-                    logger.record_tabular("fps", fps)
-                    logger.record_tabular("policy_entropy", float(policy_entropy))
-                    logger.record_tabular("value_loss", float(value_loss))
-                    logger.record_tabular("explained_variance", float(explained_var))
-                    if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
-                        logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
-                        logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
-                    logger.dump_tabular()
+                    if writer is not None:
+                        total_episode_reward_logger(self.episode_reward,
+                                                    true_reward.reshape((self.n_envs, self.n_steps)),
+                                                    masks.reshape((self.n_envs, self.n_steps)),
+                                                    writer, self.num_timesteps)
+
+                    if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
+                        explained_var = explained_variance(values, rewards)
+                        logger.record_tabular("nupdates", update)
+                        logger.record_tabular("total_timesteps", self.num_timesteps)
+                        logger.record_tabular("fps", fps)
+                        logger.record_tabular("policy_entropy", float(policy_entropy))
+                        logger.record_tabular("value_loss", float(value_loss))
+                        logger.record_tabular("explained_variance", float(explained_var))
+                        if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
+                            logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
+                            logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
+                        logger.dump_tabular()
 
         callback.on_training_end()
         return self
@@ -349,7 +388,8 @@ class A2CRunner(AbstractEnvRunner):
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            actions, values, states, _ = self.model.step(self.obs, self.states, self.dones)
+            with rlscope_common.iml_prof_operation('sample_action'):
+                actions, values, states, _ = self.model.step(self.obs, self.states, self.dones)
             mb_obs.append(np.copy(self.obs))
             mb_actions.append(actions)
             mb_values.append(values)
@@ -358,7 +398,8 @@ class A2CRunner(AbstractEnvRunner):
             # Clip the actions to avoid out of bound error
             if isinstance(self.env.action_space, gym.spaces.Box):
                 clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-            obs, rewards, dones, infos = self.env.step(clipped_actions)
+            with rlscope_common.iml_prof_operation('step'):
+                obs, rewards, dones, infos = self.env.step(clipped_actions)
 
             self.model.num_timesteps += self.n_envs
 

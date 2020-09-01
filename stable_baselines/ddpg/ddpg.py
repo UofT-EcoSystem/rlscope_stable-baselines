@@ -21,6 +21,8 @@ from stable_baselines.common.math_util import unscale_action, scale_action
 from stable_baselines.common.mpi_running_mean_std import RunningMeanStd
 from stable_baselines.ddpg.policies import DDPGPolicy
 
+import iml_profiler.api as iml
+from stable_baselines import rlscope_common
 
 def normalize(tensor, stats):
     """
@@ -805,6 +807,16 @@ class DDPG(OffPolicyRLModel):
                 self.param_noise_stddev: self.param_noise.current_stddev,
             })
 
+    def is_warmed_up(self):
+        """
+        Return true once we are executing the full training-loop.
+
+        :return:
+        """
+        # can_sample affects whether DDPG performs 'train_step' and 'update_target_network'
+        can_sample = self.replay_buffer.can_sample(self.batch_size)
+        return can_sample
+
     def learn(self, total_timesteps, callback=None, log_interval=100, tb_log_name="DDPG",
               reset_num_timesteps=True, replay_wrapper=None):
 
@@ -813,6 +825,15 @@ class DDPG(OffPolicyRLModel):
 
         if replay_wrapper is not None:
             self.replay_buffer = replay_wrapper(self.replay_buffer)
+
+        # Set some default trace-collection termination conditions (if not set via the cmdline).
+        # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
+        #
+        # NOTE: DDPG runs nb_rollout_steps=100 of simulator steps, nb_train_steps=50 SGD updates and
+        # update target networks, and nb_eval_step=100 evaluation simulation steps.
+        # (hence, we run for fewer iterations than DQN/SAC)
+        iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
+        iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
 
         with SetVerbosity(self.verbose), TensorboardWriter(self.graph, self.tensorboard_log, tb_log_name, new_tb_log) \
                 as writer:
@@ -863,8 +884,22 @@ class DDPG(OffPolicyRLModel):
 
                 callback.on_training_start(locals(), globals())
 
+                rlscope_common.iml_register_operations({
+                    'training_loop',
+                    'sample_action',
+                    'step',
+                    'train_step',
+                    'update_target_network',
+                    'evaluate',
+                })
+
                 while True:
                     for _ in range(log_interval):
+
+                        rlscope_common.before_each_iteration(
+                            total_steps, total_timesteps,
+                            is_warmed_up=self.is_warmed_up())
+
                         callback.on_rollout_start()
                         # Perform rollouts.
                         for _ in range(self.nb_rollout_steps):
@@ -874,25 +909,27 @@ class DDPG(OffPolicyRLModel):
                                 return self
 
                             # Predict next action.
-                            action, q_value = self._policy(obs, apply_noise=True, compute_q=True)
-                            assert action.shape == self.env.action_space.shape
+                            with rlscope_common.iml_prof_operation('sample_action'):
+                                action, q_value = self._policy(obs, apply_noise=True, compute_q=True)
+                                assert action.shape == self.env.action_space.shape
 
-                            # Execute next action.
-                            if rank == 0 and self.render:
-                                self.env.render()
+                                # Execute next action.
+                                if rank == 0 and self.render:
+                                    self.env.render()
 
-                            # Randomly sample actions from a uniform distribution
-                            # with a probability self.random_exploration (used in HER + DDPG)
-                            if np.random.rand() < self.random_exploration:
-                                # actions sampled from action space are from range specific to the environment
-                                # but algorithm operates on tanh-squashed actions therefore simple scaling is used
-                                unscaled_action = self.action_space.sample()
-                                action = scale_action(self.action_space, unscaled_action)
-                            else:
-                                # inferred actions need to be transformed to environment action_space before stepping
-                                unscaled_action = unscale_action(self.action_space, action)
+                                # Randomly sample actions from a uniform distribution
+                                # with a probability self.random_exploration (used in HER + DDPG)
+                                if np.random.rand() < self.random_exploration:
+                                    # actions sampled from action space are from range specific to the environment
+                                    # but algorithm operates on tanh-squashed actions therefore simple scaling is used
+                                    unscaled_action = self.action_space.sample()
+                                    action = scale_action(self.action_space, unscaled_action)
+                                else:
+                                    # inferred actions need to be transformed to environment action_space before stepping
+                                    unscaled_action = unscale_action(self.action_space, action)
 
-                            new_obs, reward, done, info = self.env.step(unscaled_action)
+                            with rlscope_common.iml_prof_operation('step'):
+                                new_obs, reward, done, info = self.env.step(unscaled_action)
 
                             self.num_timesteps += 1
                             callback.update_locals(locals())
@@ -971,34 +1008,37 @@ class DDPG(OffPolicyRLModel):
                             step = (int(t_train * (self.nb_rollout_steps / self.nb_train_steps)) +
                                     self.num_timesteps - self.nb_rollout_steps)
 
-                            critic_loss, actor_loss = self._train_step(step, writer, log=t_train == 0)
+                            with rlscope_common.iml_prof_operation('train_step'):
+                                critic_loss, actor_loss = self._train_step(step, writer, log=t_train == 0)
                             epoch_critic_losses.append(critic_loss)
                             epoch_actor_losses.append(actor_loss)
-                            self._update_target_net()
+                            with rlscope_common.iml_prof_operation('update_target_network'):
+                                self._update_target_net()
 
-                        # Evaluate.
-                        eval_episode_rewards = []
-                        eval_qs = []
-                        if self.eval_env is not None:
-                            eval_episode_reward = 0.
-                            for _ in range(self.nb_eval_steps):
-                                if total_steps >= total_timesteps:
-                                    return self
+                        with rlscope_common.iml_prof_operation('evaluate'):
+                            # Evaluate.
+                            eval_episode_rewards = []
+                            eval_qs = []
+                            if self.eval_env is not None:
+                                eval_episode_reward = 0.
+                                for _ in range(self.nb_eval_steps):
+                                    if total_steps >= total_timesteps:
+                                        return self
 
-                                eval_action, eval_q = self._policy(eval_obs, apply_noise=False, compute_q=True)
-                                unscaled_action = unscale_action(self.action_space, eval_action)
-                                eval_obs, eval_r, eval_done, _ = self.eval_env.step(unscaled_action)
-                                if self.render_eval:
-                                    self.eval_env.render()
-                                eval_episode_reward += eval_r
+                                    eval_action, eval_q = self._policy(eval_obs, apply_noise=False, compute_q=True)
+                                    unscaled_action = unscale_action(self.action_space, eval_action)
+                                    eval_obs, eval_r, eval_done, _ = self.eval_env.step(unscaled_action)
+                                    if self.render_eval:
+                                        self.eval_env.render()
+                                    eval_episode_reward += eval_r
 
-                                eval_qs.append(eval_q)
-                                if eval_done:
-                                    if not isinstance(self.env, VecEnv):
-                                        eval_obs = self.eval_env.reset()
-                                    eval_episode_rewards.append(eval_episode_reward)
-                                    eval_episode_rewards_history.append(eval_episode_reward)
-                                    eval_episode_reward = 0.
+                                    eval_qs.append(eval_q)
+                                    if eval_done:
+                                        if not isinstance(self.env, VecEnv):
+                                            eval_obs = self.eval_env.reset()
+                                        eval_episode_rewards.append(eval_episode_reward)
+                                        eval_episode_rewards_history.append(eval_episode_reward)
+                                        eval_episode_reward = 0.
 
                     mpi_size = MPI.COMM_WORLD.Get_size()
 

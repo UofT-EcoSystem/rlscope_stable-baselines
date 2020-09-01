@@ -11,6 +11,8 @@ from stable_baselines.common.vec_env import VecEnv
 if typing.TYPE_CHECKING:
     from stable_baselines.common.base_class import BaseRLModel  # pytype: disable=pyi-error
 
+import iml_profiler.api as iml
+from stable_baselines import rlscope_common
 
 class AbstractEnvRunner(ABC):
     def __init__(self, *, env: Union[gym.Env, VecEnv], model: 'BaseRLModel', n_steps: int):
@@ -111,7 +113,8 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
     callback.on_rollout_start()
 
     while True:
-        action, vpred, states, _ = policy.step(observation.reshape(-1, *observation.shape), states, done)
+        with rlscope_common.iml_prof_operation('sample_action'):
+            action, vpred, states, _ = policy.step(observation.reshape(-1, *observation.shape), states, done)
         # Slight weirdness here because we need value function at time T
         # before returning segment [0, T-1] so we get the correct
         # terminal value
@@ -133,7 +136,8 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                     "total_timestep": current_it_len,
                     'continue_training': True
             }
-            _, vpred, _, _ = policy.step(observation.reshape(-1, *observation.shape))
+            with rlscope_common.iml_prof_operation('sample_action'):
+                _, vpred, _, _ = policy.step(observation.reshape(-1, *observation.shape))
             # Be careful!!! if you change the downstream algorithm to aggregate
             # several of these batches, then be sure to do a deepcopy
             ep_rets = []
@@ -153,12 +157,13 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
         if isinstance(env.action_space, gym.spaces.Box):
             clipped_action = np.clip(action, env.action_space.low, env.action_space.high)
 
-        if gail:
-            reward = reward_giver.get_reward(observation, clipped_action[0])
-            observation, true_reward, done, info = env.step(clipped_action[0])
-        else:
-            observation, reward, done, info = env.step(clipped_action[0])
-            true_reward = reward
+        with rlscope_common.iml_prof_operation('step'):
+            if gail:
+                reward = reward_giver.get_reward(observation, clipped_action[0])
+                observation, true_reward, done, info = env.step(clipped_action[0])
+            else:
+                observation, reward, done, info = env.step(clipped_action[0])
+                true_reward = reward
 
         if callback is not None:
             callback.update_locals(locals())
