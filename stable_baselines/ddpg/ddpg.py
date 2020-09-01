@@ -7,8 +7,9 @@ import warnings
 
 import gym
 import numpy as np
-import tensorflow as tf
-import tensorflow.contrib as tc
+import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
+# import tensorflow.contrib as tc
+import stable_baselines.tensorflow_v1.contrib as tc
 from mpi4py import MPI
 
 from stable_baselines import logger

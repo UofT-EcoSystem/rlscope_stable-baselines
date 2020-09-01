@@ -1,5 +1,6 @@
-import tensorflow as tf
-import tensorflow.contrib.layers as tf_layers
+import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
+# import tensorflow.contrib.layers as tf_layers
+from tf_slim.layers import layers as tf_layers
 import numpy as np
 from gym.spaces import Discrete
 

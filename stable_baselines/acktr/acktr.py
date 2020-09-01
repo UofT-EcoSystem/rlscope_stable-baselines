@@ -1,7 +1,7 @@
 import time
 import warnings
 
-import tensorflow as tf
+import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
 from gym.spaces import Box, Discrete
 
 from stable_baselines import logger

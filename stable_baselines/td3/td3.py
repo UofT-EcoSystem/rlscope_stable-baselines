@@ -2,7 +2,7 @@ import time
 import warnings
 
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
 
 from stable_baselines import logger
 from stable_baselines.common import tf_util, OffPolicyRLModel, SetVerbosity, TensorboardWriter

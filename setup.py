@@ -18,7 +18,7 @@ with open(os.path.join('stable_baselines', 'version.txt'), 'r') as file_handler:
 def find_tf_dependency():
     install_tf, tf_gpu = False, False
     try:
-        import tensorflow as tf
+        import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
         if tf.__version__ < LooseVersion('1.8.0'):
             install_tf = True
             # check if a gpu version is needed
@@ -130,6 +130,8 @@ setup(name='stable_baselines',
           'numpy',
           'pandas',
           'matplotlib'
+          'tf-slim==1.1.0',
+          'tensorflow-probability==0.10.0',
       ] + find_tf_dependency(),
       extras_require={
         'mpi': [

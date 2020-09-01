@@ -1,7 +1,7 @@
 import re
 from functools import reduce
 
-import tensorflow as tf
+import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
 import numpy as np
 
 from stable_baselines.acktr.kfac_utils import detect_min_val, factor_reshape, gmatmul

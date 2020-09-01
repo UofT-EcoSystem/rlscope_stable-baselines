@@ -3,7 +3,7 @@ Reference: https://github.com/openai/imitation
 I follow the architecture from the official repository
 """
 import gym
-import tensorflow as tf
+import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
 import numpy as np
 
 from stable_baselines.common.mpi_running_mean_std import RunningMeanStd
