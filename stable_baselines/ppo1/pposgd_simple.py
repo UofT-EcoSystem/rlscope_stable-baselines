@@ -3,7 +3,7 @@ from collections import deque
 
 import gym
 import numpy as np
-import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
+import tensorflow.compat.v1 as tf
 from mpi4py import MPI
 
 from stable_baselines.common import Dataset, explained_variance, fmt_row, zipsame, ActorCriticRLModel, SetVerbosity, \

@@ -3,7 +3,7 @@ from itertools import zip_longest
 from abc import ABC, abstractmethod
 
 import numpy as np
-import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
+import tensorflow.compat.v1 as tf
 from gym.spaces import Discrete
 
 from stable_baselines.common.tf_util import batch_to_seq, seq_to_batch

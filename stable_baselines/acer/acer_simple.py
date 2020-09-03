@@ -2,7 +2,7 @@ import time
 import warnings
 
 import numpy as np
-import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
+import tensorflow.compat.v1 as tf
 from gym.spaces import Discrete, Box
 from collections import deque
 

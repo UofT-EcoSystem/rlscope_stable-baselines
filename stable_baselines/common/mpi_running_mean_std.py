@@ -1,5 +1,5 @@
 import mpi4py
-import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
+import tensorflow.compat.v1 as tf
 import numpy as np
 
 import stable_baselines.common.tf_util as tf_util

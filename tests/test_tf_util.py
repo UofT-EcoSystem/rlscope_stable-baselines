@@ -1,6 +1,6 @@
 # tests for tf_util
 import numpy as np
-import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
+import tensorflow.compat.v1 as tf
 
 from stable_baselines.common.tf_util import function, initialize, single_threaded_session, is_image
 

@@ -3,7 +3,7 @@ import time
 import os
 
 import gym
-import tensorflow.compat.v1 as tf; tf.disable_v2_behavior()
+import tensorflow.compat.v1 as tf
 import numpy as np
 from mpi4py import MPI
 
