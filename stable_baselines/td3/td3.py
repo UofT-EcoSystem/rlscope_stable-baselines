@@ -315,6 +315,7 @@ class TD3(OffPolicyRLModel):
             'train_actor_and_critic',
             'train_critic',
             'evaluate',
+            'replay_buffer_add',
         })
 
         with SetVerbosity(self.verbose), TensorboardWriter(self.graph, self.tensorboard_log, tb_log_name, new_tb_log) \
@@ -390,12 +391,13 @@ class TD3(OffPolicyRLModel):
                         # Avoid changing the original ones
                         obs_, new_obs_, reward_ = obs, new_obs, reward
 
-                    # Store transition in the replay buffer.
-                    self.replay_buffer_add(obs_, action, reward_, new_obs_, done, info)
-                    obs = new_obs
-                    # Save the unnormalized observation
-                    if self._vec_normalize_env is not None:
-                        obs_ = new_obs_
+                    with rlscope_common.iml_prof_operation('replay_buffer_add'):
+                        # Store transition in the replay buffer.
+                        self.replay_buffer_add(obs_, action, reward_, new_obs_, done, info)
+                        obs = new_obs
+                        # Save the unnormalized observation
+                        if self._vec_normalize_env is not None:
+                            obs_ = new_obs_
 
                     # Retrieve reward and episode length if using Monitor wrapper
                     maybe_ep_info = info.get('episode')
