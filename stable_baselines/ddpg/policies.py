@@ -1,4 +1,6 @@
 import tensorflow.compat.v1 as tf
+from tf_slim.layers import layers as tf_layers
+import numpy as np
 from gym.spaces import Box
 
 from stable_baselines.common.policies import BasePolicy, nature_cnn, register_policy
@@ -22,6 +24,7 @@ class DDPGPolicy(BasePolicy):
         super(DDPGPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=reuse, scale=scale,
                                          add_action_ph=True)
         assert isinstance(ac_space, Box), "Error: the action space must be of type gym.spaces.Box"
+        assert (np.abs(ac_space.low) == ac_space.high).all(), "Error: the action space low and high must be symmetric"
         self.qvalue_fn = None
         self.policy = None
 
@@ -135,7 +138,7 @@ class FeedForwardPolicy(DDPGPolicy):
             for i, layer_size in enumerate(self.layers):
                 pi_h = tf.layers.dense(pi_h, layer_size, name='fc' + str(i))
                 if self.layer_norm:
-                    pi_h = tf.contrib.layers.layer_norm(pi_h, center=True, scale=True)
+                    pi_h = tf_layers.layer_norm(pi_h, center=True, scale=True)
                 pi_h = self.activ(pi_h)
             self.policy = tf.nn.tanh(tf.layers.dense(pi_h, self.ac_space.shape[0], name=scope,
                                                      kernel_initializer=tf.random_uniform_initializer(minval=-3e-3,
@@ -156,7 +159,7 @@ class FeedForwardPolicy(DDPGPolicy):
             for i, layer_size in enumerate(self.layers):
                 qf_h = tf.layers.dense(qf_h, layer_size, name='fc' + str(i))
                 if self.layer_norm:
-                    qf_h = tf.contrib.layers.layer_norm(qf_h, center=True, scale=True)
+                    qf_h = tf_layers.layer_norm(qf_h, center=True, scale=True)
                 qf_h = self.activ(qf_h)
                 if i == 0:
                     qf_h = tf.concat([qf_h, action], axis=-1)

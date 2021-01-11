@@ -201,6 +201,7 @@ class DDPG(OffPolicyRLModel):
     """
     def __init__(self, policy, env, gamma=0.99, memory_policy=None, eval_env=None, nb_train_steps=50,
                  nb_rollout_steps=100, nb_eval_steps=100, param_noise=None, action_noise=None,
+                 learning_starts=None,
                  normalize_observations=False, tau=0.001, batch_size=128, param_noise_adaption_interval=50,
                  normalize_returns=False, enable_popart=False, observation_range=(-5., 5.), critic_l2_reg=0.,
                  return_range=(-np.inf, np.inf), actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1.,
@@ -247,11 +248,20 @@ class DDPG(OffPolicyRLModel):
         self.param_noise_adaption_interval = param_noise_adaption_interval
         self.nb_train_steps = nb_train_steps
         self.nb_rollout_steps = nb_rollout_steps
+        logger.info("RLS: nb_rollout_steps (consecutive simulator steps) = {nb_rollout_steps}".format(
+            nb_rollout_steps=self.nb_rollout_steps,
+        ))
+        logger.info("RLS: nb_train_steps (consecutive gradient_steps) = {nb_train_steps}".format(
+            nb_train_steps=self.nb_train_steps,
+        ))
         self.memory_limit = memory_limit
         self.buffer_size = buffer_size
         self.tensorboard_log = tensorboard_log
         self.full_tensorboard_log = full_tensorboard_log
         self.random_exploration = random_exploration
+        if learning_starts is None:
+            learning_starts = batch_size
+        self.learning_starts = learning_starts
 
         # init
         self.graph = None
@@ -807,15 +817,14 @@ class DDPG(OffPolicyRLModel):
                 self.param_noise_stddev: self.param_noise.current_stddev,
             })
 
-    def is_warmed_up(self):
+    def is_warmed_up(self, total_steps):
         """
         Return true once we are executing the full training-loop.
 
         :return:
         """
         # can_sample affects whether DDPG performs 'train_step' and 'update_target_network'
-        can_sample = self.replay_buffer.can_sample(self.batch_size)
-        return can_sample
+        return self.replay_buffer.can_sample(self.batch_size) and total_steps >= self.learning_starts
 
     def learn(self, total_timesteps, callback=None, log_interval=100, tb_log_name="DDPG",
               reset_num_timesteps=True, replay_wrapper=None):
@@ -832,8 +841,12 @@ class DDPG(OffPolicyRLModel):
         # NOTE: DDPG runs nb_rollout_steps=100 of simulator steps, nb_train_steps=50 SGD updates and
         # update target networks, and nb_eval_step=100 evaluation simulation steps.
         # (hence, we run for fewer iterations than DQN/SAC)
-        iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
-        iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+
+        # iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
+        # iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+
+        iml.prof.set_max_training_loop_iters(10, skip_if_set=True)
+        iml.prof.set_delay_training_loop_iters(1, skip_if_set=True)
 
         with SetVerbosity(self.verbose), TensorboardWriter(self.graph, self.tensorboard_log, tb_log_name, new_tb_log) \
                 as writer:
@@ -898,147 +911,165 @@ class DDPG(OffPolicyRLModel):
 
                         rlscope_common.before_each_iteration(
                             total_steps, total_timesteps,
-                            is_warmed_up=self.is_warmed_up())
+                            is_warmed_up=self.is_warmed_up(total_steps))
 
-                        callback.on_rollout_start()
-                        # Perform rollouts.
-                        for _ in range(self.nb_rollout_steps):
+                        with rlscope_common.iml_prof_operation('training_loop'):
 
-                            if total_steps >= total_timesteps:
-                                callback.on_training_end()
-                                return self
+                            callback.on_rollout_start()
+                            # Perform rollouts.
+                            # for _ in range(self.nb_rollout_steps):
+                            start_rollout_step = total_steps
+                            # Collect nb_rollout_steps transitions
+                            end_rollout_step = total_steps + self.nb_rollout_steps
+                            is_initial_rollout = (total_steps == 0)
+                            while True:
+                                if is_initial_rollout:
+                                    # Still need to collect at least self.learning_starts samples.
+                                    if total_steps >= self.learning_starts:
+                                        is_initial_rollout = False
+                                        # We've collect the "intial" steps, but we still need to collect nb_rollout_steps.
+                                        # (matches behaviour of other frameworks like tf-agents).
+                                        start_rollout_step = total_steps
+                                        end_rollout_step = total_steps + self.nb_rollout_steps
+                                else:
+                                    if total_steps >= end_rollout_step:
+                                        break
 
-                            # Predict next action.
-                            with rlscope_common.iml_prof_operation('sample_action'):
-                                action, q_value = self._policy(obs, apply_noise=True, compute_q=True)
-                                assert action.shape == self.env.action_space.shape
+                                if total_steps >= total_timesteps:
+                                    callback.on_training_end()
+                                    return self
 
-                                # Execute next action.
+                                # Predict next action.
+                                with rlscope_common.iml_prof_operation('sample_action'):
+                                    action, q_value = self._policy(obs, apply_noise=True, compute_q=True)
+                                    assert action.shape == self.env.action_space.shape
+
+                                    # Execute next action.
+                                    if rank == 0 and self.render:
+                                        self.env.render()
+
+                                    # Randomly sample actions from a uniform distribution
+                                    # with a probability self.random_exploration (used in HER + DDPG)
+                                    if np.random.rand() < self.random_exploration:
+                                        # actions sampled from action space are from range specific to the environment
+                                        # but algorithm operates on tanh-squashed actions therefore simple scaling is used
+                                        unscaled_action = self.action_space.sample()
+                                        action = scale_action(self.action_space, unscaled_action)
+                                    else:
+                                        # inferred actions need to be transformed to environment action_space before stepping
+                                        unscaled_action = unscale_action(self.action_space, action)
+
+                                with rlscope_common.iml_prof_operation('step'):
+                                    new_obs, reward, done, info = self.env.step(unscaled_action)
+
+                                self.num_timesteps += 1
+                                callback.update_locals(locals())
+                                if callback.on_step() is False:
+                                    callback.on_training_end()
+                                    return self
+
+                                step += 1
+                                total_steps += 1
                                 if rank == 0 and self.render:
                                     self.env.render()
 
-                                # Randomly sample actions from a uniform distribution
-                                # with a probability self.random_exploration (used in HER + DDPG)
-                                if np.random.rand() < self.random_exploration:
-                                    # actions sampled from action space are from range specific to the environment
-                                    # but algorithm operates on tanh-squashed actions therefore simple scaling is used
-                                    unscaled_action = self.action_space.sample()
-                                    action = scale_action(self.action_space, unscaled_action)
+                                # Book-keeping.
+                                epoch_actions.append(action)
+                                epoch_qs.append(q_value)
+
+                                # Store only the unnormalized version
+                                if self._vec_normalize_env is not None:
+                                    new_obs_ = self._vec_normalize_env.get_original_obs().squeeze()
+                                    reward_ = self._vec_normalize_env.get_original_reward().squeeze()
                                 else:
-                                    # inferred actions need to be transformed to environment action_space before stepping
-                                    unscaled_action = unscale_action(self.action_space, action)
+                                    # Avoid changing the original ones
+                                    obs_, new_obs_, reward_ = obs, new_obs, reward
 
-                            with rlscope_common.iml_prof_operation('step'):
-                                new_obs, reward, done, info = self.env.step(unscaled_action)
+                                self._store_transition(obs_, action, reward_, new_obs_, done, info)
+                                obs = new_obs
+                                # Save the unnormalized observation
+                                if self._vec_normalize_env is not None:
+                                    obs_ = new_obs_
 
-                            self.num_timesteps += 1
-                            callback.update_locals(locals())
-                            if callback.on_step() is False:
-                                callback.on_training_end()
-                                return self
+                                episode_reward += reward_
+                                episode_step += 1
 
-                            step += 1
-                            total_steps += 1
-                            if rank == 0 and self.render:
-                                self.env.render()
+                                if writer is not None:
+                                    ep_rew = np.array([reward_]).reshape((1, -1))
+                                    ep_done = np.array([done]).reshape((1, -1))
+                                    tf_util.total_episode_reward_logger(self.episode_reward, ep_rew, ep_done,
+                                                                        writer, self.num_timesteps)
 
-                            # Book-keeping.
-                            epoch_actions.append(action)
-                            epoch_qs.append(q_value)
+                                if done:
+                                    # Episode done.
+                                    epoch_episode_rewards.append(episode_reward)
+                                    episode_rewards_history.append(episode_reward)
+                                    epoch_episode_steps.append(episode_step)
+                                    episode_reward = 0.
+                                    episode_step = 0
+                                    epoch_episodes += 1
+                                    episodes += 1
 
-                            # Store only the unnormalized version
-                            if self._vec_normalize_env is not None:
-                                new_obs_ = self._vec_normalize_env.get_original_obs().squeeze()
-                                reward_ = self._vec_normalize_env.get_original_reward().squeeze()
-                            else:
-                                # Avoid changing the original ones
-                                obs_, new_obs_, reward_ = obs, new_obs, reward
+                                    maybe_is_success = info.get('is_success')
+                                    if maybe_is_success is not None:
+                                        episode_successes.append(float(maybe_is_success))
 
-                            self._store_transition(obs_, action, reward_, new_obs_, done, info)
-                            obs = new_obs
-                            # Save the unnormalized observation
-                            if self._vec_normalize_env is not None:
-                                obs_ = new_obs_
+                                    self._reset()
+                                    if not isinstance(self.env, VecEnv):
+                                        obs = self.env.reset()
 
-                            episode_reward += reward_
-                            episode_step += 1
+                            callback.on_rollout_end()
+                            # Train.
+                            epoch_actor_losses = []
+                            epoch_critic_losses = []
+                            epoch_adaptive_distances = []
+                            for t_train in range(self.nb_train_steps):
+                                # Not enough samples in the replay buffer
+                                if not self.replay_buffer.can_sample(self.batch_size):
+                                    break
 
-                            if writer is not None:
-                                ep_rew = np.array([reward_]).reshape((1, -1))
-                                ep_done = np.array([done]).reshape((1, -1))
-                                tf_util.total_episode_reward_logger(self.episode_reward, ep_rew, ep_done,
-                                                                    writer, self.num_timesteps)
+                                # Adapt param noise, if necessary.
+                                if len(self.replay_buffer) >= self.batch_size and \
+                                        t_train % self.param_noise_adaption_interval == 0:
+                                    distance = self._adapt_param_noise()
+                                    epoch_adaptive_distances.append(distance)
 
-                            if done:
-                                # Episode done.
-                                epoch_episode_rewards.append(episode_reward)
-                                episode_rewards_history.append(episode_reward)
-                                epoch_episode_steps.append(episode_step)
-                                episode_reward = 0.
-                                episode_step = 0
-                                epoch_episodes += 1
-                                episodes += 1
+                                # weird equation to deal with the fact the nb_train_steps will be different
+                                # to nb_rollout_steps
+                                step = (int(t_train * (self.nb_rollout_steps / self.nb_train_steps)) +
+                                        self.num_timesteps - self.nb_rollout_steps)
 
-                                maybe_is_success = info.get('is_success')
-                                if maybe_is_success is not None:
-                                    episode_successes.append(float(maybe_is_success))
+                                with rlscope_common.iml_prof_operation('train_step'):
+                                    critic_loss, actor_loss = self._train_step(step, writer, log=t_train == 0)
+                                epoch_critic_losses.append(critic_loss)
+                                epoch_actor_losses.append(actor_loss)
+                                with rlscope_common.iml_prof_operation('update_target_network'):
+                                    self._update_target_net()
 
-                                self._reset()
-                                if not isinstance(self.env, VecEnv):
-                                    obs = self.env.reset()
+                            with rlscope_common.iml_prof_operation('evaluate'):
+                                # Evaluate.
+                                eval_episode_rewards = []
+                                eval_qs = []
+                                if self.eval_env is not None:
+                                    eval_episode_reward = 0.
+                                    for _ in range(self.nb_eval_steps):
+                                        if total_steps >= total_timesteps:
+                                            return self
 
-                        callback.on_rollout_end()
-                        # Train.
-                        epoch_actor_losses = []
-                        epoch_critic_losses = []
-                        epoch_adaptive_distances = []
-                        for t_train in range(self.nb_train_steps):
-                            # Not enough samples in the replay buffer
-                            if not self.replay_buffer.can_sample(self.batch_size):
-                                break
+                                        eval_action, eval_q = self._policy(eval_obs, apply_noise=False, compute_q=True)
+                                        unscaled_action = unscale_action(self.action_space, eval_action)
+                                        eval_obs, eval_r, eval_done, _ = self.eval_env.step(unscaled_action)
+                                        if self.render_eval:
+                                            self.eval_env.render()
+                                        eval_episode_reward += eval_r
 
-                            # Adapt param noise, if necessary.
-                            if len(self.replay_buffer) >= self.batch_size and \
-                                    t_train % self.param_noise_adaption_interval == 0:
-                                distance = self._adapt_param_noise()
-                                epoch_adaptive_distances.append(distance)
-
-                            # weird equation to deal with the fact the nb_train_steps will be different
-                            # to nb_rollout_steps
-                            step = (int(t_train * (self.nb_rollout_steps / self.nb_train_steps)) +
-                                    self.num_timesteps - self.nb_rollout_steps)
-
-                            with rlscope_common.iml_prof_operation('train_step'):
-                                critic_loss, actor_loss = self._train_step(step, writer, log=t_train == 0)
-                            epoch_critic_losses.append(critic_loss)
-                            epoch_actor_losses.append(actor_loss)
-                            with rlscope_common.iml_prof_operation('update_target_network'):
-                                self._update_target_net()
-
-                        with rlscope_common.iml_prof_operation('evaluate'):
-                            # Evaluate.
-                            eval_episode_rewards = []
-                            eval_qs = []
-                            if self.eval_env is not None:
-                                eval_episode_reward = 0.
-                                for _ in range(self.nb_eval_steps):
-                                    if total_steps >= total_timesteps:
-                                        return self
-
-                                    eval_action, eval_q = self._policy(eval_obs, apply_noise=False, compute_q=True)
-                                    unscaled_action = unscale_action(self.action_space, eval_action)
-                                    eval_obs, eval_r, eval_done, _ = self.eval_env.step(unscaled_action)
-                                    if self.render_eval:
-                                        self.eval_env.render()
-                                    eval_episode_reward += eval_r
-
-                                    eval_qs.append(eval_q)
-                                    if eval_done:
-                                        if not isinstance(self.env, VecEnv):
-                                            eval_obs = self.eval_env.reset()
-                                        eval_episode_rewards.append(eval_episode_reward)
-                                        eval_episode_rewards_history.append(eval_episode_reward)
-                                        eval_episode_reward = 0.
+                                        eval_qs.append(eval_q)
+                                        if eval_done:
+                                            if not isinstance(self.env, VecEnv):
+                                                eval_obs = self.eval_env.reset()
+                                            eval_episode_rewards.append(eval_episode_reward)
+                                            eval_episode_rewards_history.append(eval_episode_reward)
+                                            eval_episode_reward = 0.
 
                     mpi_size = MPI.COMM_WORLD.Get_size()
 
