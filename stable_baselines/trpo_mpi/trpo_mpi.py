@@ -19,7 +19,7 @@ from stable_baselines.common.misc_util import flatten_lists
 from stable_baselines.common.runners import traj_segment_generator
 from stable_baselines.trpo_mpi.utils import add_vtarg_and_adv
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 from stable_baselines import rlscope_common
 
 class TRPO(ActorCriticRLModel):
@@ -287,10 +287,10 @@ class TRPO(ActorCriticRLModel):
         #
         # NOTE: A2C runs n_env=4 * n_step=32 per training loop iteration
         # (hence, we run lots more iterations than DQN/SAC).
-        iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
-        iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+        rlscope.prof.set_max_training_loop_iters(100, skip_if_set=True)
+        rlscope.prof.set_delay_training_loop_iters(10, skip_if_set=True)
 
-        rlscope_common.iml_register_operations({
+        rlscope_common.rlscope_register_operations({
             'estimate_advantage',
             'estimate_policy_gradient',
             'estimate_conjugate_gradient',
@@ -362,7 +362,7 @@ class TRPO(ActorCriticRLModel):
                         if not seg.get('continue_training', True):  # pytype: disable=attribute-error
                             break
 
-                        with rlscope_common.iml_prof_operation('estimate_advantage'):
+                        with rlscope_common.rlscope_prof_operation('estimate_advantage'):
                             add_vtarg_and_adv(seg, self.gamma, self.lam)
                         # ob, ac, atarg, ret, td1ret = map(np.concatenate, (obs, acs, atargs, rets, td1rets))
                         observation, action = seg["observations"], seg["actions"]
@@ -386,7 +386,7 @@ class TRPO(ActorCriticRLModel):
 
                         self.assign_old_eq_new(sess=self.sess)
 
-                        with self.timed("computegrad"), rlscope_common.iml_prof_operation('estimate_policy_gradient'):
+                        with self.timed("computegrad"), rlscope_common.rlscope_prof_operation('estimate_policy_gradient'):
                             steps = self.num_timesteps + (k + 1) * (seg["total_timestep"] / self.g_step)
                             run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                             run_metadata = tf.RunMetadata() if self.full_tensorboard_log else None
@@ -408,13 +408,13 @@ class TRPO(ActorCriticRLModel):
                         if np.allclose(grad, 0):
                             logger.log("Got zero gradient. not updating")
                         else:
-                            with self.timed("conjugate_gradient"), rlscope_common.iml_prof_operation('estimate_conjugate_gradient'):
+                            with self.timed("conjugate_gradient"), rlscope_common.rlscope_prof_operation('estimate_conjugate_gradient'):
                                 stepdir = conjugate_gradient(fisher_vector_product, grad, cg_iters=self.cg_iters,
                                                              verbose=self.rank == 0 and self.verbose >= 1)
                             assert np.isfinite(stepdir).all()
                             shs = .5 * stepdir.dot(fisher_vector_product(stepdir))
                             # abs(shs) to avoid taking square root of negative values
-                            with rlscope_common.iml_prof_operation('estimate_proposed_step'):
+                            with rlscope_common.rlscope_prof_operation('estimate_proposed_step'):
                                 lagrange_multiplier = np.sqrt(abs(shs) / self.max_kl)
                             # logger.log("lagrange multiplier:", lm, "gnorm:", np.linalg.norm(g))
                             fullstep = stepdir / lagrange_multiplier
@@ -450,7 +450,7 @@ class TRPO(ActorCriticRLModel):
                             for (loss_name, loss_val) in zip(self.loss_names, mean_losses):
                                 logger.record_tabular(loss_name, loss_val)
 
-                        with self.timed("vf"), rlscope_common.iml_prof_operation('final_update'):
+                        with self.timed("vf"), rlscope_common.rlscope_prof_operation('final_update'):
                             for _ in range(self.vf_iters):
                                 # NOTE: for recurrent policies, use shuffle=False?
                                 for (mbob, mbret) in dataset.iterbatches((seg["observations"], seg["tdlamret"]),

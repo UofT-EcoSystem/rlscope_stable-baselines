@@ -12,7 +12,7 @@ from stable_baselines.common.buffers import ReplayBuffer, PrioritizedReplayBuffe
 from stable_baselines.deepq.build_graph import build_train
 from stable_baselines.deepq.policies import DQNPolicy
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 from stable_baselines import rlscope_common
 
 class DQN(OffPolicyRLModel):
@@ -208,15 +208,15 @@ class DQN(OffPolicyRLModel):
             # Set some default trace-collection termination conditions (if not set via the cmdline).
             # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
             #
-            # NOTE: DQN and SAC both call iml.prof.report_progress after each timestep
+            # NOTE: DQN and SAC both call rlscope.prof.report_progress after each timestep
             # (hence, we run lots more iterations than DDPG/PPO).
-            #iml.prof.set_max_training_loop_iters(10000, skip_if_set=True)
-            #iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
-            iml.prof.set_max_passes(10, skip_if_set=True)
+            #rlscope.prof.set_max_training_loop_iters(10000, skip_if_set=True)
+            #rlscope.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+            rlscope.prof.set_max_passes(10, skip_if_set=True)
             # 1 configuration pass.
-            iml.prof.set_delay_passes(1, skip_if_set=True)
+            rlscope.prof.set_delay_passes(1, skip_if_set=True)
 
-            rlscope_common.iml_register_operations({
+            rlscope_common.rlscope_register_operations({
                 'training_loop',
                 'q_forward',
                 'step',
@@ -230,9 +230,9 @@ class DQN(OffPolicyRLModel):
                     t, total_timesteps,
                     is_warmed_up=self.is_warmed_up())
 
-                with rlscope_common.iml_prof_operation('training_loop'):
+                with rlscope_common.rlscope_prof_operation('training_loop'):
 
-                    with rlscope_common.iml_prof_operation('q_forward'):
+                    with rlscope_common.rlscope_prof_operation('q_forward'):
                         # Take action and update exploration to the newest value
                         kwargs = {}
                         if not self.param_noise:
@@ -254,7 +254,7 @@ class DQN(OffPolicyRLModel):
                             action = self.act(np.array(obs)[None], update_eps=update_eps, **kwargs)[0]
                         env_action = action
                         reset = False
-                    with rlscope_common.iml_prof_operation('step'):
+                    with rlscope_common.rlscope_prof_operation('step'):
                         new_obs, rew, done, info = self.env.step(env_action)
 
                     self.num_timesteps += 1
@@ -299,7 +299,7 @@ class DQN(OffPolicyRLModel):
                     can_sample = self.replay_buffer.can_sample(self.batch_size)
                     if can_sample and self.num_timesteps > self.learning_starts \
                             and self.num_timesteps % self.train_freq == 0:
-                        with rlscope_common.iml_prof_operation('q_backward'):
+                        with rlscope_common.rlscope_prof_operation('q_backward'):
                             callback.on_rollout_end()
                             # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
                             # pytype:disable=bad-unpacking
@@ -343,7 +343,7 @@ class DQN(OffPolicyRLModel):
 
                     if can_sample and self.num_timesteps > self.learning_starts and \
                             self.num_timesteps % self.target_network_update_freq == 0:
-                        with rlscope_common.iml_prof_operation('q_update_target_network'):
+                        with rlscope_common.rlscope_prof_operation('q_update_target_network'):
                             # Update target network periodically.
                             self.update_target(sess=self.sess)
 

@@ -11,7 +11,7 @@ from stable_baselines.common.vec_env import VecEnv
 if typing.TYPE_CHECKING:
     from stable_baselines.common.base_class import BaseRLModel  # pytype: disable=pyi-error
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 from stable_baselines import rlscope_common
 
 class AbstractEnvRunner(ABC):
@@ -113,7 +113,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
     callback.on_rollout_start()
 
     while True:
-        with rlscope_common.iml_prof_operation('sample_action'):
+        with rlscope_common.rlscope_prof_operation('sample_action'):
             action, vpred, states, _ = policy.step(observation.reshape(-1, *observation.shape), states, done)
         # Slight weirdness here because we need value function at time T
         # before returning segment [0, T-1] so we get the correct
@@ -136,7 +136,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                     "total_timestep": current_it_len,
                     'continue_training': True
             }
-            with rlscope_common.iml_prof_operation('sample_action'):
+            with rlscope_common.rlscope_prof_operation('sample_action'):
                 _, vpred, _, _ = policy.step(observation.reshape(-1, *observation.shape))
             # Be careful!!! if you change the downstream algorithm to aggregate
             # several of these batches, then be sure to do a deepcopy
@@ -157,7 +157,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
         if isinstance(env.action_space, gym.spaces.Box):
             clipped_action = np.clip(action, env.action_space.low, env.action_space.high)
 
-        with rlscope_common.iml_prof_operation('step'):
+        with rlscope_common.rlscope_prof_operation('step'):
             if gail:
                 reward = reward_giver.get_reward(observation, clipped_action[0])
                 observation, true_reward, done, info = env.step(clipped_action[0])

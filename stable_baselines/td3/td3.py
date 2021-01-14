@@ -12,7 +12,7 @@ from stable_baselines.common.schedules import get_schedule_fn
 from stable_baselines.common.buffers import ReplayBuffer
 from stable_baselines.td3.policies import TD3Policy
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 from stable_baselines import rlscope_common
 
 class TD3(OffPolicyRLModel):
@@ -249,7 +249,7 @@ class TD3(OffPolicyRLModel):
         else:
             operation = 'train_critic'
         # import pdb; pdb.set_trace()
-        with rlscope_common.iml_prof_operation(operation):
+        with rlscope_common.rlscope_prof_operation(operation):
             batch = self.replay_buffer.sample(self.batch_size, env=self._vec_normalize_env)
             batch_obs, batch_actions, batch_rewards, batch_next_obs, batch_dones = batch
 
@@ -304,11 +304,11 @@ class TD3(OffPolicyRLModel):
         # NOTE: DDPG runs nb_rollout_steps=100 of simulator steps, nb_train_steps=50 SGD updates and
         # update target networks, and nb_eval_step=100 evaluation simulation steps.
         # (hence, we run for fewer iterations than DQN/SAC)
-        iml.prof.set_max_training_loop_iters(5, skip_if_set=True)
-        # iml.prof.set_max_training_loop_iters(1, skip_if_set=True)
-        iml.prof.set_delay_training_loop_iters(1, skip_if_set=True)
+        rlscope.prof.set_max_training_loop_iters(5, skip_if_set=True)
+        # rlscope.prof.set_max_training_loop_iters(1, skip_if_set=True)
+        rlscope.prof.set_delay_training_loop_iters(1, skip_if_set=True)
 
-        rlscope_common.iml_register_operations({
+        rlscope_common.rlscope_register_operations({
             'training_loop',
             'sample_action',
             'step',
@@ -349,9 +349,9 @@ class TD3(OffPolicyRLModel):
                     step, total_timesteps,
                     is_warmed_up=self.is_warmed_up())
 
-                with rlscope_common.iml_prof_operation('training_loop'):
+                with rlscope_common.rlscope_prof_operation('training_loop'):
 
-                    with rlscope_common.iml_prof_operation('sample_action'):
+                    with rlscope_common.rlscope_prof_operation('sample_action'):
                         # Before training starts, randomly sample actions
                         # from a uniform distribution for better exploration.
                         # Afterwards, use the learned policy
@@ -372,7 +372,7 @@ class TD3(OffPolicyRLModel):
 
                         assert action.shape == self.env.action_space.shape
 
-                    with rlscope_common.iml_prof_operation('step'):
+                    with rlscope_common.rlscope_prof_operation('step'):
                         new_obs, reward, done, info = self.env.step(unscaled_action)
 
                     self.num_timesteps += 1
@@ -391,7 +391,7 @@ class TD3(OffPolicyRLModel):
                         # Avoid changing the original ones
                         obs_, new_obs_, reward_ = obs, new_obs, reward
 
-                    with rlscope_common.iml_prof_operation('replay_buffer_add'):
+                    with rlscope_common.rlscope_prof_operation('replay_buffer_add'):
                         # Store transition in the replay buffer.
                         self.replay_buffer_add(obs_, action, reward_, new_obs_, done, info)
                         obs = new_obs
@@ -440,7 +440,7 @@ class TD3(OffPolicyRLModel):
 
                         callback.on_rollout_start()
 
-                    with rlscope_common.iml_prof_operation('evaluate'):
+                    with rlscope_common.rlscope_prof_operation('evaluate'):
 
                         episode_rewards[-1] += reward_
                         if done:

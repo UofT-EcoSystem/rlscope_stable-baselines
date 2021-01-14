@@ -21,7 +21,7 @@ from stable_baselines.common.math_util import unscale_action, scale_action
 from stable_baselines.common.mpi_running_mean_std import RunningMeanStd
 from stable_baselines.ddpg.policies import DDPGPolicy
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 from stable_baselines import rlscope_common
 
 def normalize(tensor, stats):
@@ -842,11 +842,11 @@ class DDPG(OffPolicyRLModel):
         # update target networks, and nb_eval_step=100 evaluation simulation steps.
         # (hence, we run for fewer iterations than DQN/SAC)
 
-        # iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
-        # iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+        # rlscope.prof.set_max_training_loop_iters(100, skip_if_set=True)
+        # rlscope.prof.set_delay_training_loop_iters(10, skip_if_set=True)
 
-        iml.prof.set_max_training_loop_iters(10, skip_if_set=True)
-        iml.prof.set_delay_training_loop_iters(1, skip_if_set=True)
+        rlscope.prof.set_max_training_loop_iters(10, skip_if_set=True)
+        rlscope.prof.set_delay_training_loop_iters(1, skip_if_set=True)
 
         with SetVerbosity(self.verbose), TensorboardWriter(self.graph, self.tensorboard_log, tb_log_name, new_tb_log) \
                 as writer:
@@ -897,7 +897,7 @@ class DDPG(OffPolicyRLModel):
 
                 callback.on_training_start(locals(), globals())
 
-                rlscope_common.iml_register_operations({
+                rlscope_common.rlscope_register_operations({
                     'training_loop',
                     'sample_action',
                     'step',
@@ -913,7 +913,7 @@ class DDPG(OffPolicyRLModel):
                             total_steps, total_timesteps,
                             is_warmed_up=self.is_warmed_up(total_steps))
 
-                        with rlscope_common.iml_prof_operation('training_loop'):
+                        with rlscope_common.rlscope_prof_operation('training_loop'):
 
                             callback.on_rollout_start()
                             # Perform rollouts.
@@ -940,7 +940,7 @@ class DDPG(OffPolicyRLModel):
                                     return self
 
                                 # Predict next action.
-                                with rlscope_common.iml_prof_operation('sample_action'):
+                                with rlscope_common.rlscope_prof_operation('sample_action'):
                                     action, q_value = self._policy(obs, apply_noise=True, compute_q=True)
                                     assert action.shape == self.env.action_space.shape
 
@@ -959,7 +959,7 @@ class DDPG(OffPolicyRLModel):
                                         # inferred actions need to be transformed to environment action_space before stepping
                                         unscaled_action = unscale_action(self.action_space, action)
 
-                                with rlscope_common.iml_prof_operation('step'):
+                                with rlscope_common.rlscope_prof_operation('step'):
                                     new_obs, reward, done, info = self.env.step(unscaled_action)
 
                                 self.num_timesteps += 1
@@ -1039,14 +1039,14 @@ class DDPG(OffPolicyRLModel):
                                 step = (int(t_train * (self.nb_rollout_steps / self.nb_train_steps)) +
                                         self.num_timesteps - self.nb_rollout_steps)
 
-                                with rlscope_common.iml_prof_operation('train_step'):
+                                with rlscope_common.rlscope_prof_operation('train_step'):
                                     critic_loss, actor_loss = self._train_step(step, writer, log=t_train == 0)
                                 epoch_critic_losses.append(critic_loss)
                                 epoch_actor_losses.append(actor_loss)
-                                with rlscope_common.iml_prof_operation('update_target_network'):
+                                with rlscope_common.rlscope_prof_operation('update_target_network'):
                                     self._update_target_net()
 
-                            with rlscope_common.iml_prof_operation('evaluate'):
+                            with rlscope_common.rlscope_prof_operation('evaluate'):
                                 # Evaluate.
                                 eval_episode_rewards = []
                                 eval_qs = []

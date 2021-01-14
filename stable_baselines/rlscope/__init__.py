@@ -1,10 +1,10 @@
 #
-# IML: support for "irregular" benchmarking toolkit annotations.
+# RL-Scope: support for "irregular" benchmarking toolkit annotations.
 #
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 
-from iml_profiler.parser import constants
-from iml_profiler.profiler.clib_wrap import CFuncWrapper
+from rlscope.parser import constants
+from rlscope.profiler.clib_wrap import CFuncWrapper
 
 import pybullet
 import pybullet_envs
@@ -15,7 +15,7 @@ import functools
 
 def wrap_pybullet():
 
-    # iml.wrap_entire_module(
+    # rlscope.wrap_entire_module(
     #     'pybullet',
     #     category=constants.CATEGORY_SIMULATOR_CPP,
     #     debug=True)
@@ -23,7 +23,7 @@ def wrap_pybullet():
 
     def should_wrap(name, func):
         return inspect.isbuiltin(func)
-    iml.wrap_module(
+    rlscope.wrap_module(
         pybullet, category=constants.CATEGORY_SIMULATOR_CPP,
         should_wrap=should_wrap,
         # debug=True,
@@ -33,13 +33,13 @@ def wrap_pybullet():
 def unwrap_pybullet():
 
     # _unwrap_bullet_clients()
-    # iml.unwrap_entire_module('pybullet')
+    # rlscope.unwrap_entire_module('pybullet')
 
     _unwrap_bullet_clients()
-    iml.unwrap_module(pybullet)
+    rlscope.unwrap_module(pybullet)
 
 #
-# IML: pybullet specific work-around!
+# RL-Scope: pybullet specific work-around!
 #
 # pybullet python library does some weird dynamic stuff when accessing shared-library functions.
 # Basically BulletClient class is checking whether a function that's getting fetched is a built-in.

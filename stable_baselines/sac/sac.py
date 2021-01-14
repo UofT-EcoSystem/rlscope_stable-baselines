@@ -12,7 +12,7 @@ from stable_baselines.common.buffers import ReplayBuffer
 from stable_baselines.sac.policies import SACPolicy
 from stable_baselines import logger
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 from stable_baselines import rlscope_common
 
 class SAC(OffPolicyRLModel):
@@ -374,12 +374,12 @@ class SAC(OffPolicyRLModel):
         # Set some default trace-collection termination conditions (if not set via the cmdline).
         # These were set via experimentation until training ran for "sufficiently long" (e.g. 2-4 minutes).
         #
-        # NOTE: DQN and SAC both call iml.prof.report_progress after each timestep
+        # NOTE: DQN and SAC both call rlscope.prof.report_progress after each timestep
         # (hence, we run lots more iterations than DDPG/PPO).
-        iml.prof.set_max_training_loop_iters(10000, skip_if_set=True)
-        iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+        rlscope.prof.set_max_training_loop_iters(10000, skip_if_set=True)
+        rlscope.prof.set_delay_training_loop_iters(10, skip_if_set=True)
 
-        rlscope_common.iml_register_operations({
+        rlscope_common.rlscope_register_operations({
             'training_loop',
             'sample_action',
             'step',
@@ -419,9 +419,9 @@ class SAC(OffPolicyRLModel):
                     step, total_timesteps,
                     is_warmed_up=self.is_warmed_up())
 
-                with rlscope_common.iml_prof_operation('training_loop'):
+                with rlscope_common.rlscope_prof_operation('training_loop'):
 
-                    with rlscope_common.iml_prof_operation('sample_action'):
+                    with rlscope_common.rlscope_prof_operation('sample_action'):
                         # Before training starts, randomly sample actions
                         # from a uniform distribution for better exploration.
                         # Afterwards, use the learned policy
@@ -442,7 +442,7 @@ class SAC(OffPolicyRLModel):
 
                         assert action.shape == self.env.action_space.shape
 
-                    with rlscope_common.iml_prof_operation('step'):
+                    with rlscope_common.rlscope_prof_operation('step'):
                         new_obs, reward, done, info = self.env.step(unscaled_action)
 
                     self.num_timesteps += 1
@@ -495,12 +495,12 @@ class SAC(OffPolicyRLModel):
                             # Compute current learning_rate
                             frac = 1.0 - step / total_timesteps
                             current_lr = self.learning_rate(frac)
-                            with rlscope_common.iml_prof_operation('update_actor_and_critic'):
+                            with rlscope_common.rlscope_prof_operation('update_actor_and_critic'):
                                 # Update policy and critics (q functions)
                                 mb_infos_vals.append(self._train_step(step, writer, current_lr))
                             # Update target network
                             if (step + grad_step) % self.target_update_interval == 0:
-                                with rlscope_common.iml_prof_operation('update_target_network'):
+                                with rlscope_common.rlscope_prof_operation('update_target_network'):
                                     # Update target network
                                     self.sess.run(self.target_update_op)
                         # Log losses and entropy, useful for monitor training

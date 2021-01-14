@@ -1,6 +1,6 @@
 import textwrap
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 
 def before_each_iteration(iteration, num_iterations, is_warmed_up=None):
   # GOAL: we only want to call report_progress once we've seen ALL the operations run
@@ -9,12 +9,12 @@ def before_each_iteration(iteration, num_iterations, is_warmed_up=None):
   waiting_for = OPERATIONS_AVAILABLE.difference(OPERATIONS_SEEN)
   should_report_progress = len(waiting_for) == 0 and ( is_warmed_up is None or is_warmed_up )
 
-  if iml.prof.delay and should_report_progress and not iml.prof.tracing_enabled:
-    # Entire training loop is now running; enable IML tracing
-    iml.prof.enable_tracing()
+  if rlscope.prof.delay and should_report_progress and not rlscope.prof.tracing_enabled:
+    # Entire training loop is now running; enable RL-Scope tracing
+    rlscope.prof.enable_tracing()
 
-  if iml.prof.debug:
-    iml.logger.info(textwrap.dedent("""\
+  if rlscope.prof.debug:
+    rlscope.logger.info(textwrap.dedent("""\
         RLS: @ t={iteration}: OPERATIONS_SEEN = {OPERATIONS_SEEN}
           waiting for = {waiting_for}
           is_warmed_up = {is_warmed_up}
@@ -26,15 +26,15 @@ def before_each_iteration(iteration, num_iterations, is_warmed_up=None):
     )).rstrip())
   if should_report_progress:
     OPERATIONS_SEEN.clear()
-    iml.prof.report_progress(
+    rlscope.prof.report_progress(
       percent_complete=iteration/float(num_iterations),
       num_timesteps=iteration,
       total_timesteps=num_iterations)
-    if iml.prof.tracing_enabled:
-      iml.logger.info(textwrap.dedent("""\
+    if rlscope.prof.tracing_enabled:
+      rlscope.logger.info(textwrap.dedent("""\
         RLS: @ t={iteration}: PASS {pass_idx}
         """.format(
-        pass_idx=iml.prof.pass_idx,
+        pass_idx=rlscope.prof.pass_idx,
         iteration=iteration,
       )).rstrip())
 
@@ -44,13 +44,13 @@ def before_each_iteration(iteration, num_iterations, is_warmed_up=None):
 OPERATIONS_SEEN = set()
 OPERATIONS_AVAILABLE = set()
 
-def iml_register_operations(operations):
+def rlscope_register_operations(operations):
   for operation in operations:
     OPERATIONS_AVAILABLE.add(operation)
 
-def iml_prof_operation(operation):
+def rlscope_prof_operation(operation):
   should_skip = operation not in OPERATIONS_AVAILABLE
-  op = iml.prof.operation(operation, skip=should_skip)
+  op = rlscope.prof.operation(operation, skip=should_skip)
   if not should_skip:
     OPERATIONS_SEEN.add(operation)
   return op

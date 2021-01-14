@@ -12,7 +12,7 @@ from stable_baselines.common.schedules import get_schedule_fn
 from stable_baselines.common.tf_util import total_episode_reward_logger
 from stable_baselines.common.math_util import safe_mean
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 from stable_baselines import rlscope_common
 
 class PPO2(ActorCriticRLModel):
@@ -325,10 +325,10 @@ class PPO2(ActorCriticRLModel):
         #
         # NOTE: PPO2 runs for n_env=8 * n_step=2048 per training loop iteration.
         # (hence, we run for fewer iterations than DQN/SAC)
-        iml.prof.set_max_training_loop_iters(10, skip_if_set=True)
-        iml.prof.set_delay_training_loop_iters(3, skip_if_set=True)
+        rlscope.prof.set_max_training_loop_iters(10, skip_if_set=True)
+        rlscope.prof.set_delay_training_loop_iters(3, skip_if_set=True)
 
-        rlscope_common.iml_register_operations({
+        rlscope_common.rlscope_register_operations({
             'training_loop',
             'optimize_surrogate',
             'sample_action',
@@ -351,7 +351,7 @@ class PPO2(ActorCriticRLModel):
                     (update-1) * self.n_batch, total_timesteps,
                     is_warmed_up=self.is_warmed_up())
 
-                with rlscope_common.iml_prof_operation('training_loop'):
+                with rlscope_common.rlscope_prof_operation('training_loop'):
                     assert self.n_batch % self.nminibatches == 0, ("The number of minibatches (`nminibatches`) "
                                                                    "is not a factor of the total number of samples "
                                                                    "collected per rollout (`n_batch`), "
@@ -378,7 +378,7 @@ class PPO2(ActorCriticRLModel):
 
                     self.ep_info_buf.extend(ep_infos)
                     mb_loss_vals = []
-                    with rlscope_common.iml_prof_operation('optimize_surrogate'):
+                    with rlscope_common.rlscope_prof_operation('optimize_surrogate'):
                         if states is None:  # nonrecurrent version
                             update_fac = max(self.n_batch // self.nminibatches // self.noptepochs, 1)
                             inds = np.arange(self.n_batch)
@@ -503,7 +503,7 @@ class Runner(AbstractEnvRunner):
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            with rlscope_common.iml_prof_operation('sample_action'):
+            with rlscope_common.rlscope_prof_operation('sample_action'):
                 actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
@@ -514,7 +514,7 @@ class Runner(AbstractEnvRunner):
             # Clip the actions to avoid out of bound error
             if isinstance(self.env.action_space, gym.spaces.Box):
                 clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-            with rlscope_common.iml_prof_operation('step'):
+            with rlscope_common.rlscope_prof_operation('step'):
                 self.obs[:], rewards, self.dones, infos = self.env.step(clipped_actions)
 
             self.model.num_timesteps += self.n_envs
@@ -533,7 +533,7 @@ class Runner(AbstractEnvRunner):
                     ep_infos.append(maybe_ep_info)
             mb_rewards.append(rewards)
         # batch of steps to batch of rollouts
-        with rlscope_common.iml_prof_operation('compute_advantage_estimates'):
+        with rlscope_common.rlscope_prof_operation('compute_advantage_estimates'):
             mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
             mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
             mb_actions = np.asarray(mb_actions)

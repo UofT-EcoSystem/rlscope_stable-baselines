@@ -12,7 +12,7 @@ from stable_baselines.common.schedules import Scheduler
 from stable_baselines.common.tf_util import mse, total_episode_reward_logger
 from stable_baselines.common.math_util import safe_mean
 
-import iml_profiler.api as iml
+import rlscope.api as rlscope
 from stable_baselines import rlscope_common
 
 def discount_with_dones(rewards, dones, gamma):
@@ -259,7 +259,7 @@ class A2C(ActorCriticRLModel):
 
         n_updates = total_timesteps // self.n_batch
         if n_updates == 0:
-            print(("IML WARNING: training loop won't get traced; you need to use a "
+            print(("RL-Scope WARNING: training loop won't get traced; you need to use a "
                    "larger number for --n-timesteps (currently {t}); preferably some multiple of {n_batch}").format(
                 t=total_timesteps,
                 n_batch=self.n_batch,
@@ -270,10 +270,10 @@ class A2C(ActorCriticRLModel):
         #
         # NOTE: A2C runs n_env=4 * n_step=32 per training loop iteration
         # (hence, we run lots more iterations than DQN/SAC).
-        iml.prof.set_max_training_loop_iters(100, skip_if_set=True)
-        iml.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+        rlscope.prof.set_max_training_loop_iters(100, skip_if_set=True)
+        rlscope.prof.set_delay_training_loop_iters(10, skip_if_set=True)
 
-        rlscope_common.iml_register_operations({
+        rlscope_common.rlscope_register_operations({
             'training_loop',
             'sample_action',
             'step',
@@ -295,7 +295,7 @@ class A2C(ActorCriticRLModel):
                     update * self.n_batch, total_timesteps,
                     is_warmed_up=self.is_warmed_up())
 
-                with rlscope_common.iml_prof_operation('training_loop'):
+                with rlscope_common.rlscope_prof_operation('training_loop'):
                     callback.on_rollout_start()
                     # true_reward is the reward without discount
                     rollout = self.runner.run(callback)
@@ -309,7 +309,7 @@ class A2C(ActorCriticRLModel):
                         break
 
                     self.ep_info_buf.extend(ep_infos)
-                    with rlscope_common.iml_prof_operation('train_step'):
+                    with rlscope_common.rlscope_prof_operation('train_step'):
                         _, value_loss, policy_entropy = self._train_step(obs, states, rewards, masks, actions, values,
                                                                          self.num_timesteps // self.n_batch, writer)
                     n_seconds = time.time() - t_start
@@ -388,7 +388,7 @@ class A2CRunner(AbstractEnvRunner):
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            with rlscope_common.iml_prof_operation('sample_action'):
+            with rlscope_common.rlscope_prof_operation('sample_action'):
                 actions, values, states, _ = self.model.step(self.obs, self.states, self.dones)
             mb_obs.append(np.copy(self.obs))
             mb_actions.append(actions)
@@ -398,7 +398,7 @@ class A2CRunner(AbstractEnvRunner):
             # Clip the actions to avoid out of bound error
             if isinstance(self.env.action_space, gym.spaces.Box):
                 clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-            with rlscope_common.iml_prof_operation('step'):
+            with rlscope_common.rlscope_prof_operation('step'):
                 obs, rewards, dones, infos = self.env.step(clipped_actions)
 
             self.model.num_timesteps += self.n_envs
