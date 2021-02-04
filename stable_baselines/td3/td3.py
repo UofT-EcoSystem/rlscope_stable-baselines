@@ -304,9 +304,9 @@ class TD3(OffPolicyRLModel):
         # NOTE: DDPG runs nb_rollout_steps=100 of simulator steps, nb_train_steps=50 SGD updates and
         # update target networks, and nb_eval_step=100 evaluation simulation steps.
         # (hence, we run for fewer iterations than DQN/SAC)
-        rlscope.prof.set_max_training_loop_iters(5, skip_if_set=True)
-        # rlscope.prof.set_max_training_loop_iters(1, skip_if_set=True)
-        rlscope.prof.set_delay_training_loop_iters(1, skip_if_set=True)
+        rlscope.prof.set_max_passes(5, skip_if_set=True)
+        # rlscope.prof.set_max_passes(1, skip_if_set=True)
+        rlscope.prof.set_delay_passes(1, skip_if_set=True)
 
         rlscope_common.rlscope_register_operations({
             'training_loop',

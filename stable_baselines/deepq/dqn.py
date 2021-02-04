@@ -210,8 +210,8 @@ class DQN(OffPolicyRLModel):
             #
             # NOTE: DQN and SAC both call rlscope.prof.report_progress after each timestep
             # (hence, we run lots more iterations than DDPG/PPO).
-            #rlscope.prof.set_max_training_loop_iters(10000, skip_if_set=True)
-            #rlscope.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+            #rlscope.prof.set_max_passes(10000, skip_if_set=True)
+            #rlscope.prof.set_delay_passes(10, skip_if_set=True)
             rlscope.prof.set_max_passes(10, skip_if_set=True)
             # 1 configuration pass.
             rlscope.prof.set_delay_passes(1, skip_if_set=True)

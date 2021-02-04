@@ -842,11 +842,11 @@ class DDPG(OffPolicyRLModel):
         # update target networks, and nb_eval_step=100 evaluation simulation steps.
         # (hence, we run for fewer iterations than DQN/SAC)
 
-        # rlscope.prof.set_max_training_loop_iters(100, skip_if_set=True)
-        # rlscope.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+        # rlscope.prof.set_max_passes(100, skip_if_set=True)
+        # rlscope.prof.set_delay_passes(10, skip_if_set=True)
 
-        rlscope.prof.set_max_training_loop_iters(10, skip_if_set=True)
-        rlscope.prof.set_delay_training_loop_iters(1, skip_if_set=True)
+        rlscope.prof.set_max_passes(10, skip_if_set=True)
+        rlscope.prof.set_delay_passes(1, skip_if_set=True)
 
         with SetVerbosity(self.verbose), TensorboardWriter(self.graph, self.tensorboard_log, tb_log_name, new_tb_log) \
                 as writer:

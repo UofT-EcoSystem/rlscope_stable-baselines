@@ -270,8 +270,8 @@ class A2C(ActorCriticRLModel):
         #
         # NOTE: A2C runs n_env=4 * n_step=32 per training loop iteration
         # (hence, we run lots more iterations than DQN/SAC).
-        rlscope.prof.set_max_training_loop_iters(100, skip_if_set=True)
-        rlscope.prof.set_delay_training_loop_iters(10, skip_if_set=True)
+        rlscope.prof.set_max_passes(100, skip_if_set=True)
+        rlscope.prof.set_delay_passes(10, skip_if_set=True)
 
         rlscope_common.rlscope_register_operations({
             'training_loop',
